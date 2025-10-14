@@ -1,3 +1,4 @@
+//app/routes/user.js
 import express from 'express';
 import { user } from '../controllers/user.js';
 import { verifyToken } from '../middlewares/jwtAuth.js';
@@ -13,5 +14,15 @@ router.post('/complete-registration', verifyToken, imageConversionMiddlewareMult
 
 // Route to login with OTP (for existing users) and return isNewUser status
 router.post('/login-with-otp', user.loginUserWithOTP);
+
+router.get('/', verifyToken, user.getUserDetails);
+
+router.get("/users", verifyToken, user.getAllUsers);
+
+router.get("/filter", verifyToken, user.filterUsers);
+
+router.post("/like", verifyToken, user.likeUser);
+
+router.post("/dislike", verifyToken, user.dislikeUser);
 
 export default router;
