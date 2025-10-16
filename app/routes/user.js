@@ -21,8 +21,8 @@ router.get("/users", verifyToken, user.getAllUsers);
 
 router.get("/filter", verifyToken, user.filterUsers);
 
-router.post("/like", verifyToken, user.likeUser);
+router.post("/like/:targetUserId", verifyToken, user.likeUser);
 
-router.post("/dislike", verifyToken, user.dislikeUser);
+router.post("/dislike/:targetUserId", verifyToken, user.dislikeUser);
 
 export default router;

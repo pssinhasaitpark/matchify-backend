@@ -1,3 +1,4 @@
+//app/middlewares/jwtAuth.js
 import jwt from "jsonwebtoken";
 import { User } from '../models/user.js';
 import { handleResponse } from "../utils/helper.js";

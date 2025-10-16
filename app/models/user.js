@@ -59,6 +59,7 @@ const userSchema = new mongoose.Schema(
 
     likedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     dislikedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    // googleId: { type: String, default: null },
   },
   { timestamps: true }
 );

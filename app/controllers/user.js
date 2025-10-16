@@ -8,6 +8,7 @@ import { generateToken } from "../middlewares/jwtAuth.js";
 import jwt from 'jsonwebtoken';
 import mongoose from 'mongoose';
 import { normalizeInterest, normalizeAgeRange, assignUserFields } from '../utils/user.js';
+import { UserInteraction } from '../models/userInteraction.js';
 
 const completeRegistrationAfterEmailVerification = async (req, res) => {
   try {
@@ -84,7 +85,7 @@ const verifyEmailForOTP = async (req, res) => {
       await sendOTPEmail(email, otp);
       await user.save();
 
-      return handleResponse(res, 200, 'OTP sent to your email. Please verify to log in.');
+      return handleResponse(res, 200, 'OTP sent to your email. Please verify OTP to log in.');
     }
 
     const newUser = new User({
@@ -443,23 +444,48 @@ const filterUsers = async (req, res) => {
     return handleResponse(res, 500, "Something went wrong.");
   }
 };
-
+/*
 const likeUser = async (req, res) => {
   try {
     const { targetUserId } = req.body;
     const userId = req.user.id;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return handleResponse(res, 404, "User not found.");
+    // Validate targetUserId
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return handleResponse(res, 400, "Invalid target user ID format.");
     }
 
-    if (!user.likedUsers.includes(targetUserId)) {
-      user.likedUsers.push(targetUserId);
-      await user.save();
+    // Check if target user exists
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return handleResponse(res, 404, "Target user not found.");
     }
 
-    return handleResponse(res, 200, "User liked successfully.");
+    // Find or create the user's interaction document
+    let userInteraction = await UserInteraction.findOne({ userId });
+
+    if (!userInteraction) {
+      userInteraction = await UserInteraction.create({
+        userId,
+        likedUsers: [],
+        dislikedUsers: [],
+      });
+    }
+
+    // Check if the targetUserId is already in likedUsers
+    const alreadyLiked = userInteraction.likedUsers.some(
+      (user) => user.targetUserId.toString() === targetUserId
+    );
+
+    if (alreadyLiked) {
+      return handleResponse(res, 200, "You have already liked this user.");
+    }
+
+    // Add the targetUserId to likedUsers
+    userInteraction.likedUsers.push({ targetUserId });
+    await userInteraction.save();
+
+    return handleResponse(res, 201, "User liked successfully.");
   } catch (error) {
     console.error("Error in likeUser:", error);
     return handleResponse(res, 500, "Something went wrong.");
@@ -471,17 +497,133 @@ const dislikeUser = async (req, res) => {
     const { targetUserId } = req.body;
     const userId = req.user.id;
 
-    const user = await User.findById(userId);
-    if (!user) {
-      return handleResponse(res, 404, "User not found.");
+    // Validate targetUserId
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return handleResponse(res, 400, "Invalid target user ID format.");
     }
 
-    if (!user.dislikedUsers.includes(targetUserId)) {
-      user.dislikedUsers.push(targetUserId);
-      await user.save();
+    // Check if target user exists
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return handleResponse(res, 404, "Target user not found.");
     }
 
-    return handleResponse(res, 200, "User disliked successfully.");
+    // Find or create the user's interaction document
+    let userInteraction = await UserInteraction.findOne({ userId });
+
+    if (!userInteraction) {
+      userInteraction = await UserInteraction.create({
+        userId,
+        likedUsers: [],
+        dislikedUsers: [],
+      });
+    }
+
+    // Check if the targetUserId is already in dislikedUsers
+    const alreadyDisliked = userInteraction.dislikedUsers.some(
+      (user) => user.targetUserId.toString() === targetUserId
+    );
+
+    if (alreadyDisliked) {
+      return handleResponse(res, 200, "You have already disliked this user.");
+    }
+
+    // Add the targetUserId to dislikedUsers
+    userInteraction.dislikedUsers.push({ targetUserId });
+    await userInteraction.save();
+
+    return handleResponse(res, 201, "User disliked successfully.");
+  } catch (error) {
+    console.error("Error in dislikeUser:", error);
+    return handleResponse(res, 500, "Something went wrong.");
+  }
+};
+*/
+
+const likeUser = async (req, res) => {
+  try {
+    const { targetUserId } = req.params; // Extract from URL params
+    const userId = req.user.id;
+
+    // Validate targetUserId
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return handleResponse(res, 400, "Invalid target user ID format.");
+    }
+
+    // Check if target user exists
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return handleResponse(res, 404, "Target user not found.");
+    }
+
+    // Find or create the user's interaction document
+    let userInteraction = await UserInteraction.findOne({ userId });
+    if (!userInteraction) {
+      userInteraction = await UserInteraction.create({
+        userId,
+        likedUsers: [],
+        dislikedUsers: [],
+      });
+    }
+
+    // Check if the targetUserId is already in likedUsers
+    const alreadyLiked = userInteraction.likedUsers.some(
+      (user) => user.targetUserId.toString() === targetUserId
+    );
+    if (alreadyLiked) {
+      return handleResponse(res, 200, "You have already liked this user.");
+    }
+
+    // Add the targetUserId to likedUsers
+    userInteraction.likedUsers.push({ targetUserId });
+    await userInteraction.save();
+
+    return handleResponse(res, 201, "User liked successfully.");
+  } catch (error) {
+    console.error("Error in likeUser:", error);
+    return handleResponse(res, 500, "Something went wrong.");
+  }
+};
+
+const dislikeUser = async (req, res) => {
+  try {
+    const { targetUserId } = req.params; // Extract from URL params
+    const userId = req.user.id;
+
+    // Validate targetUserId
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return handleResponse(res, 400, "Invalid target user ID format.");
+    }
+
+    // Check if target user exists
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return handleResponse(res, 404, "Target user not found.");
+    }
+
+    // Find or create the user's interaction document
+    let userInteraction = await UserInteraction.findOne({ userId });
+    if (!userInteraction) {
+      userInteraction = await UserInteraction.create({
+        userId,
+        likedUsers: [],
+        dislikedUsers: [],
+      });
+    }
+
+    // Check if the targetUserId is already in dislikedUsers
+    const alreadyDisliked = userInteraction.dislikedUsers.some(
+      (user) => user.targetUserId.toString() === targetUserId
+    );
+    if (alreadyDisliked) {
+      return handleResponse(res, 200, "You have already disliked this user.");
+    }
+
+    // Add the targetUserId to dislikedUsers
+    userInteraction.dislikedUsers.push({ targetUserId });
+    await userInteraction.save();
+
+    return handleResponse(res, 201, "User disliked successfully.");
   } catch (error) {
     console.error("Error in dislikeUser:", error);
     return handleResponse(res, 500, "Something went wrong.");
