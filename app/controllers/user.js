@@ -1,6 +1,6 @@
 //app/controllers/user.js
 import { User } from '../models/user.js';
-import { userRegistrationValidator } from '../validators/user.js';
+import { userRegistrationValidator, reportUserValidator } from '../validators/user.js';
 import { sendOTPEmail } from '../utils/helper.js';
 import { handleResponse } from '../utils/helper.js';
 import { formatDate } from '../utils/dateFormatter.js';
@@ -126,8 +126,8 @@ const loginUserWithOTP = async (req, res) => {
   // If user is new, mark them as verified and provide the token
   if (user.isNewUser) {
     user.isVerified = true;
-    user.otp = ''; 
-    await user.save(); 
+    user.otp = '';
+    await user.save();
 
     const token = generateToken(user._id, user.email);
 
@@ -135,7 +135,7 @@ const loginUserWithOTP = async (req, res) => {
   }
 
   // If existing user, clear OTP and log them in
-  user.otp = ''; 
+  user.otp = '';
   await user.save();
 
   // Generate JWT token for the existing user
@@ -257,34 +257,52 @@ const getMatches = async (req, res) => {
 
 const getAllUsers = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const currentUserId = req.user.id;
     const { page = 1, perPage = 10 } = req.query;
-
     const skip = (page - 1) * perPage;
 
-    const matchStage = {
-      _id: { $ne: new mongoose.Types.ObjectId(String(userId)) },
-      isVerified: true,
-    };
+    // Fetch blocked and reported users
+    const userInteraction = await UserInteraction.findOne({ userId: currentUserId });
+    const blockedUserIds = userInteraction?.blockedUsers.map((user) => user.targetUserId) || [];
+    const reportedUserIds = userInteraction?.reportedUsers.map((report) => report.targetUserId) || [];
 
-    // Pipeline for aggregation
-    // const pipeline = [
-    //   { $match: matchStage },
-    //   { $skip: skip },
-    //   { $limit: Number(perPage) },
-    //   {
-    //     $project: {
-    //       otp: 0,
-    //       __v: 0,
-    //       isNewUser: 0,
-    //       isVerified: 0,
-    //       email: 0,
-    //     },
-    //   },
-    // ];
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser || !currentUser.isVerified) {
+      return handleResponse(res, 404, "User not found or not verified.");
+    }
+
+    // Get preferences from current user
+    const { show_me, preferred_match_distance, location } = currentUser;
+
+    // Gender filter logic
+    let genderFilter = {};
+    if (show_me === 'men') genderFilter.gender = 'male';
+    else if (show_me === 'women') genderFilter.gender = 'female';
+
+    // Ensure location and distance are valid
+    if (!location || !location.coordinates || location.coordinates.length !== 2) {
+      return handleResponse(res, 400, "User location is not set properly.");
+    }
+
+    const distanceInMeters = (preferred_match_distance || 50) * 1609.34;
 
     const pipeline = [
-      { $match: matchStage },
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: location.coordinates,
+          },
+          distanceField: "distance",
+          maxDistance: distanceInMeters,
+          spherical: true,
+          query: {
+            _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] }, // Exclude self, blocked, and reported users
+            isVerified: true,
+            ...genderFilter,
+          },
+        },
+      },
       { $addFields: { randomSort: { $rand: {} } } },
       { $sort: { randomSort: 1 } },
       { $skip: skip },
@@ -300,13 +318,41 @@ const getAllUsers = async (req, res) => {
       },
     ];
 
-
     const users = await User.aggregate(pipeline);
 
-    const totalItems = await User.countDocuments(matchStage);
+    // Format date_of_birth if needed
+    for (const user of users) {
+      if (user.date_of_birth) {
+        user.date_of_birth = formatDate(user.date_of_birth);
+      }
+    }
+
+    // Count total results
+    const countPipeline = [
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: location.coordinates,
+          },
+          distanceField: "distance",
+          maxDistance: distanceInMeters,
+          spherical: true,
+          query: {
+            _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] }, // Exclude self, blocked, and reported users
+            isVerified: true,
+            ...genderFilter,
+          },
+        },
+      },
+      { $count: "total" },
+    ];
+
+    const countResult = await User.aggregate(countPipeline);
+    const totalItems = countResult[0]?.total || 0;
     const totalPages = Math.ceil(totalItems / perPage);
 
-    return handleResponse(res, 200, "Users fetched successfully.", {
+    return handleResponse(res, 200, "Filtered users fetched successfully.", {
       results: users,
       totalItems,
       currentPage: Number(page),
@@ -323,9 +369,29 @@ const filterUsers = async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const query = { q: "", page: 1, perPage: 10, ...req.query, };
+    // Fetch the current user's blocked users
+    const userInteraction = await UserInteraction.findOne({ userId });
+    const blockedUserIds = userInteraction?.blockedUsers.map((user) => user.targetUserId) || [];
+     const reportedUserIds = userInteraction?.reportedUsers.map((report) => report.targetUserId) || [];
 
-    const { q, gender, sexual_orientation, show_me, minAge, maxAge, preferred_match_distance, height, hasPets, interests, page, perPage, } = query;
+    // Defaults + query params
+    const query = { q: "", page: 1, perPage: 10, ...req.query };
+    const {
+      q,
+      gender,
+      sexual_orientation,
+      show_me,
+      minAge,
+      maxAge,
+      preferred_match_distance,
+      height,
+      hasPets,
+      interests,
+      lat,
+      lng,
+      page,
+      perPage,
+    } = query;
 
     const normalizeValue = (val) => {
       if (typeof val === "string") {
@@ -335,7 +401,7 @@ const filterUsers = async (req, res) => {
     };
 
     const matchStage = {
-      _id: { $ne: new mongoose.Types.ObjectId(String(userId)) },
+      _id: { $ne: new mongoose.Types.ObjectId(String(userId)), $nin: [...blockedUserIds, ...reportedUserIds] }, // Exclude self and blocked users
       isVerified: true,
     };
 
@@ -350,31 +416,28 @@ const filterUsers = async (req, res) => {
       ];
     }
 
-    const exactFilters = ["gender", "sexual_orientation", "show_me", "smoking", "drinking", "diet", "hasKids", "wantsKids", "relationshipGoals",];
+    const exactFilters = [
+      "sexual_orientation",
+      "smoking",
+      "drinking",
+      "diet",
+      "hasKids",
+      "wantsKids",
+      "relationshipGoals",
+    ];
 
     exactFilters.forEach((field) => {
       if (query[field]) {
-        if (field === "show_me" || field === "sexual_orientation" || field === "gender") {
-          // lowercase for these enum fields to match schema
-          matchStage[field] = query[field].toLowerCase();
-        } else {
-          // capitalize first letter for other enum-like fields e.g. smoking, drinking
-          matchStage[field] = normalizeValue(query[field]);
-        }
+        matchStage[field] = normalizeValue(query[field]);
       }
     });
 
     const regexFilters = ["body_type", "religion", "caste", "profession", "education"];
-
     regexFilters.forEach((field) => {
       if (query[field]) {
         matchStage[field] = new RegExp(`^${query[field]}$`, "i");
       }
     });
-
-    if (preferred_match_distance) {
-      matchStage.preferred_match_distance = { $lte: Number(preferred_match_distance) };
-    }
 
     if (height) {
       const h = Number(height);
@@ -393,26 +456,52 @@ const filterUsers = async (req, res) => {
       const maxDOB = maxAge
         ? new Date(today.getFullYear() - Number(maxAge), today.getMonth(), today.getDate())
         : null;
-
       matchStage.date_of_birth = {};
       if (maxDOB) matchStage.date_of_birth.$gte = maxDOB;
       if (minDOB) matchStage.date_of_birth.$lte = minDOB;
     }
 
     if (interests) {
-      const interestArray = interests
-        .split(",")
-        .map((i) => i.trim().toLowerCase());
-
-      matchStage.interest = {
-        $in: interestArray,
-      };
+      const interestArray = interests.split(",").map((i) => i.trim().toLowerCase());
+      matchStage.interest = { $in: interestArray };
     }
 
-    const skip = (Number(page) - 1) * Number(perPage);
+    // Enforce 'show_me' from query filter with highest priority
+    if (show_me) {
+      if (show_me.toLowerCase() === "men") {
+        matchStage.gender = "male";
+      } else if (show_me.toLowerCase() === "women") {
+        matchStage.gender = "female";
+      } else {
+        delete matchStage.gender;
+      }
+    } else if (gender) {
+      matchStage.gender = gender.toLowerCase();
+    }
 
-    const pipeline = [
-      { $match: matchStage },
+    // Pagination
+    const skip = (Number(page) - 1) * Number(perPage);
+    let pipeline = [];
+
+    if (lat !== undefined && lng !== undefined && preferred_match_distance !== undefined) {
+      const distanceInMeters = Number(preferred_match_distance) * 1609.34;
+      pipeline.push({
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: [parseFloat(lng), parseFloat(lat)],
+          },
+          distanceField: "distance",
+          maxDistance: distanceInMeters,
+          spherical: true,
+          query: matchStage,
+        },
+      });
+    } else {
+      pipeline.push({ $match: matchStage });
+    }
+
+    pipeline.push(
       { $skip: skip },
       { $limit: Number(perPage) },
       {
@@ -423,12 +512,41 @@ const filterUsers = async (req, res) => {
           isVerified: 0,
           email: 0,
         },
-      },
-    ];
+      }
+    );
 
     const users = await User.aggregate(pipeline);
 
-    const totalItems = await User.countDocuments(matchStage);
+    for (const user of users) {
+      if (user.date_of_birth) {
+        user.date_of_birth = formatDate(user.date_of_birth);
+      }
+    }
+
+    // Count total results separately
+    let totalItems;
+    if (lat !== undefined && lng !== undefined && preferred_match_distance !== undefined) {
+      const countPipeline = [
+        {
+          $geoNear: {
+            near: {
+              type: "Point",
+              coordinates: [parseFloat(lng), parseFloat(lat)],
+            },
+            distanceField: "distance",
+            maxDistance: Number(preferred_match_distance) * 1609.34,
+            spherical: true,
+            query: matchStage,
+          },
+        },
+        { $count: "total" },
+      ];
+      const countResult = await User.aggregate(countPipeline);
+      totalItems = countResult[0]?.total || 0;
+    } else {
+      totalItems = await User.countDocuments(matchStage);
+    }
+
     const totalPages = Math.ceil(totalItems / perPage);
 
     return handleResponse(res, 200, "Filtered users fetched successfully.", {
@@ -438,107 +556,11 @@ const filterUsers = async (req, res) => {
       totalPages,
       totalItemsOnCurrentPage: users.length,
     });
-
   } catch (error) {
     console.error("Error in filterUsers:", error);
     return handleResponse(res, 500, "Something went wrong.");
   }
 };
-/*
-const likeUser = async (req, res) => {
-  try {
-    const { targetUserId } = req.body;
-    const userId = req.user.id;
-
-    // Validate targetUserId
-    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-      return handleResponse(res, 400, "Invalid target user ID format.");
-    }
-
-    // Check if target user exists
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser) {
-      return handleResponse(res, 404, "Target user not found.");
-    }
-
-    // Find or create the user's interaction document
-    let userInteraction = await UserInteraction.findOne({ userId });
-
-    if (!userInteraction) {
-      userInteraction = await UserInteraction.create({
-        userId,
-        likedUsers: [],
-        dislikedUsers: [],
-      });
-    }
-
-    // Check if the targetUserId is already in likedUsers
-    const alreadyLiked = userInteraction.likedUsers.some(
-      (user) => user.targetUserId.toString() === targetUserId
-    );
-
-    if (alreadyLiked) {
-      return handleResponse(res, 200, "You have already liked this user.");
-    }
-
-    // Add the targetUserId to likedUsers
-    userInteraction.likedUsers.push({ targetUserId });
-    await userInteraction.save();
-
-    return handleResponse(res, 201, "User liked successfully.");
-  } catch (error) {
-    console.error("Error in likeUser:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-
-const dislikeUser = async (req, res) => {
-  try {
-    const { targetUserId } = req.body;
-    const userId = req.user.id;
-
-    // Validate targetUserId
-    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-      return handleResponse(res, 400, "Invalid target user ID format.");
-    }
-
-    // Check if target user exists
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser) {
-      return handleResponse(res, 404, "Target user not found.");
-    }
-
-    // Find or create the user's interaction document
-    let userInteraction = await UserInteraction.findOne({ userId });
-
-    if (!userInteraction) {
-      userInteraction = await UserInteraction.create({
-        userId,
-        likedUsers: [],
-        dislikedUsers: [],
-      });
-    }
-
-    // Check if the targetUserId is already in dislikedUsers
-    const alreadyDisliked = userInteraction.dislikedUsers.some(
-      (user) => user.targetUserId.toString() === targetUserId
-    );
-
-    if (alreadyDisliked) {
-      return handleResponse(res, 200, "You have already disliked this user.");
-    }
-
-    // Add the targetUserId to dislikedUsers
-    userInteraction.dislikedUsers.push({ targetUserId });
-    await userInteraction.save();
-
-    return handleResponse(res, 201, "User disliked successfully.");
-  } catch (error) {
-    console.error("Error in dislikeUser:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-*/
 
 const likeUser = async (req, res) => {
   try {
@@ -626,6 +648,119 @@ const dislikeUser = async (req, res) => {
     return handleResponse(res, 201, "User disliked successfully.");
   } catch (error) {
     console.error("Error in dislikeUser:", error);
+    return handleResponse(res, 500, "Something went wrong.");
+  }
+};
+
+const blockUser = async (req, res) => {
+  try {
+    const { targetUserId } = req.params;
+    const userId = req.user.id;
+
+    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
+      return handleResponse(res, 400, "Invalid target user ID format.");
+    }
+
+    const targetUser = await User.findById(targetUserId);
+    if (!targetUser) {
+      return handleResponse(res, 404, "Target user not found.");
+    }
+
+    let userInteraction = await UserInteraction.findOne({ userId });
+    if (!userInteraction) {
+      userInteraction = await UserInteraction.create({
+        userId,
+        likedUsers: [],
+        dislikedUsers: [],
+        blockedUsers: [],
+      });
+    }
+
+    const alreadyBlocked = userInteraction.blockedUsers.some(
+      (user) => user.targetUserId.toString() === targetUserId
+    );
+    if (alreadyBlocked) {
+      return handleResponse(res, 200, "You have already blocked this user.");
+    }
+
+    userInteraction.blockedUsers.push({ targetUserId });
+    await userInteraction.save();
+
+    return handleResponse(res, 201, "User blocked successfully.");
+  } catch (error) {
+    console.error("Error in blockUser:", error);
+    return handleResponse(res, 500, "Something went wrong.");
+  }
+};
+
+const reportUser = async (req, res) => {
+  try {
+    const { reportedUserId } = req.params;
+    const { reason, details } = req.body;
+    const reporterId = req.user.id;
+
+    // Validate request body using Joi
+    const { error } = reportUserValidator.validate({ reason, details });
+    if (error) {
+      const cleanMessage = error.details[0].message.replace(/\"/g, "");
+      return handleResponse(res, 400, cleanMessage);
+    }
+
+    // Validate reportedUserId
+    if (!mongoose.Types.ObjectId.isValid(reportedUserId)) {
+      return handleResponse(res, 400, "Invalid reported user ID format.");
+    }
+
+    // Check if reported user exists
+    const reportedUser = await User.findById(reportedUserId);
+    if (!reportedUser) {
+      return handleResponse(res, 404, "Reported user not found.");
+    }
+
+    // Check if the reporter is trying to report themselves
+    if (reporterId === reportedUserId) {
+      return handleResponse(res, 400, "You cannot report yourself.");
+    }
+
+    // Find or create the user's interaction document
+    let userInteraction = await UserInteraction.findOne({ userId: reporterId });
+    if (!userInteraction) {
+      userInteraction = await UserInteraction.create({
+        userId: reporterId,
+        likedUsers: [],
+        dislikedUsers: [],
+        blockedUsers: [],
+        reportedUsers: [],
+      });
+    }
+
+    // Check if the user has already reported the same user for the same reason
+    const alreadyReported = userInteraction.reportedUsers.some(
+      (report) =>
+        report.targetUserId.toString() === reportedUserId &&
+        report.reason === reason
+    );
+
+    if (alreadyReported) {
+      return handleResponse(
+        res,
+        200,
+        "You have already reported this user for the same reason."
+      );
+    }
+
+    // Add the report to reportedUsers
+    userInteraction.reportedUsers.push({
+      targetUserId: reportedUserId,
+      reason,
+      details: details || "",
+    });
+
+    await userInteraction.save();
+
+    return handleResponse(res, 201, "User reported successfully.");
+  } catch (error) {
+    console.error("Error in reportUser:", error);
     return handleResponse(res, 500, "Something went wrong.");
   }
 };
@@ -639,5 +774,7 @@ export const user = {
   getAllUsers,
   filterUsers,
   likeUser,
-  dislikeUser
+  dislikeUser,
+  blockUser,
+  reportUser
 };

@@ -2,28 +2,44 @@
 import mongoose from "mongoose";
 
 const userInteractionSchema = new mongoose.Schema(
-    {
-        userId: {
-            type: mongoose.Schema.Types.ObjectId,
-            ref: "User",
-            required: true,
-            unique: true,
-            index: true,
-        },
-        likedUsers: [{
-            _id: false,
-            targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, },
-            createdAt: { type: Date, default: Date.now, },
-        },
-        ],
-        dislikedUsers: [{
-            _id: false,
-            targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, },
-            createdAt: { type: Date, default: Date.now, },
-        },
-        ],
+  {
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      unique: true,
+      index: true,
     },
-    { timestamps: true }
+    likedUsers: [{
+      _id: false,
+      targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, },
+      createdAt: { type: Date, default: Date.now, },
+    },
+    ],
+    dislikedUsers: [{
+      _id: false,
+      targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, },
+      createdAt: { type: Date, default: Date.now, },
+    },
+    ],
+    blockedUsers: [
+      {
+        _id: false,
+        targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, },
+        createdAt: { type: Date, default: Date.now, },
+      },
+    ],
+    reportedUsers: [
+      {
+        _id: false,
+        targetUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true, },
+        reason: { type: String, enum: ["spam", "harassment", "fake_profile", "inappropriate_content", "scam", "other",], required: true, },
+        details: { type: String, default: "", },
+        createdAt: { type: Date, default: Date.now, },
+      },
+    ],
+  },
+  { timestamps: true }
 );
 
 export const UserInteraction = mongoose.model("UserInteraction", userInteractionSchema);
