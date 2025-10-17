@@ -13,7 +13,7 @@ dotenv.config();
 
 const app = express();
 const host = process.env.HOST || "localhost";
-const port = process.env.PORT || 8000;
+const port = process.env.PORT || 8050;
 
 app.use(
   cors({

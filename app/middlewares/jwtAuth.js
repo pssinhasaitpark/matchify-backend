@@ -1,13 +1,16 @@
+//app/middlewares/jwtAuth.js
 import jwt from "jsonwebtoken";
 import { User } from '../models/user.js';
-import crypto from "crypto";
 import { handleResponse } from "../utils/helper.js";
 
 export const generateToken = (userId, email) => {
   const payload = { userId, email };
   const secret = process.env.JWT_SECRET || 'your-secret-key';
-  const options = { expiresIn: '1h' };
+  // const options = { expiresIn: '1h' };
+   const expiresIn = process.env.JWT_EXPIRATION || '7d';
 
+   const options = { expiresIn };
+   
   return jwt.sign(payload, secret, options);
 };
 

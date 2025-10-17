@@ -24,8 +24,8 @@ export const imageConversionMiddlewareMultiple = (req, res, next) => {
 
   const upload = multer({
     storage,
-    limits: { fileSize: 1024 * 1024 * 5 }, 
-    fileFilter: (req, file, cb) => cb(null, true), 
+    limits: { fileSize: 1024 * 1024 * 5 },
+    fileFilter: (req, file, cb) => cb(null, true),
   });
 
   upload.any()(req, res, async (err) => {
@@ -57,17 +57,22 @@ export const imageConversionMiddlewareMultiple = (req, res, next) => {
 
             fs.unlinkSync(uploadedFilePath);
           } else {
-            finalFileName = file.filename; 
+            finalFileName = file.filename;
           }
 
-          imageUrls.push(`http://192.168.0.14:8000/media/${encodeURIComponent(finalFileName)}`);
+          imageUrls.push(`http://192.168.0.14:8050/media/${encodeURIComponent(finalFileName)}`);
         }
 
-        if (imageUrls.length === 6) {
-          convertedFiles.images = imageUrls;
-        } else {
-          return res.status(400).send({ message: "Exactly 6 images are required." });
+        // if (imageUrls.length === 6) {
+        //   convertedFiles.images = imageUrls;
+        // } else {
+        //   return res.status(400).send({ message: "All 6 images are required." });
+        // }
+        if (imageUrls.length !== 6) {
+          return res.status(400).json({ message: "All 6 images are required." });
         }
+
+        convertedFiles.images = imageUrls;
       }
 
       req.convertedFiles = convertedFiles;
