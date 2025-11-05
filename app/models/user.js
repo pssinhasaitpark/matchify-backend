@@ -43,12 +43,12 @@ const userSchema = new mongoose.Schema(
     hasPets: { type: Boolean, default: false },
     relationshipGoals: {
       type: String,
-      enum: ["CasualDating", "SeriousRelationship", "Marriage", "OpenToExplore"],
-      default: "OpenToExplore",
+      enum: ["Casual Dating", "Serious Relationship", "Marriage", "Open to explore"],
+      default: "Open to explore",
     },
 
     images: { type: [String], required: false },
-    mobile_number: { type: String, unique: true, },
+    mobile_number: { type: String },
 
     isVerified: { type: Boolean, default: false },
     otp: { type: String, default: null },
@@ -57,8 +57,8 @@ const userSchema = new mongoose.Schema(
     profileCompleteness: { type: Number, default: 0 },
     lastActiveAt: { type: Date, default: Date.now },
 
-    likedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    dislikedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    // likedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    // dislikedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     // googleId: { type: String, default: null },
   },
   { timestamps: true }
