@@ -6,6 +6,8 @@ import { imageConversionMiddlewareMultiple } from '../middlewares/fileUploader.j
 
 const router = express.Router();
 
+router.get("/get", verifyToken, user.getUsers);
+
 // Route to verify email and send OTP (either for new user registration or existing user login)
 router.post('/verify-email', user.verifyEmailForOTP);
 

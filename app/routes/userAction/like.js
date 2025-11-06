@@ -11,4 +11,6 @@ router.get("/all", verifyToken, likes.getAllLikedUsers);
 
 router.get("/liked-me", verifyToken, likes.getUsersWhoLikedMe);
 
+router.get("/mutual-likes", verifyToken, likes.getMutualLikes);
+
 export default router;
