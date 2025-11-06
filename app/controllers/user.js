@@ -1,14 +1,14 @@
 //app/controllers/user.js
-import { User } from '../models/user.js';
-import { userRegistrationValidator, reportUserValidator } from '../validators/user.js';
-import { sendOTPEmail } from '../utils/helper.js';
-import { handleResponse } from '../utils/helper.js';
-import { formatDate } from '../utils/dateFormatter.js';
+import { User } from "../models/user.js";
+import { userRegistrationValidator } from "../validators/user.js";
+import { sendOTPEmail } from "../utils/helper.js";
+import { handleResponse } from "../utils/helper.js";
+import { formatDate } from "../utils/dateFormatter.js";
 import { generateToken } from "../middlewares/jwtAuth.js";
-import jwt from 'jsonwebtoken';
-import mongoose from 'mongoose';
-import { normalizeInterest, normalizeAgeRange, assignUserFields } from '../utils/user.js';
-import { UserInteraction } from '../models/userInteraction.js';
+import jwt from "jsonwebtoken";
+import mongoose from "mongoose";
+import { normalizeInterest, normalizeAgeRange, assignUserFields } from "../utils/user.js";
+import { getPlaceName } from "../services/locationService.js";
 
 const completeRegistrationAfterEmailVerification = async (req, res) => {
   try {
@@ -22,17 +22,21 @@ const completeRegistrationAfterEmailVerification = async (req, res) => {
     // Validate using Joi
     const { error } = userRegistrationValidator.validate(body);
     if (error) {
-      const cleanMessage = error.details[0].message.replace(/\"/g, '');
+      const cleanMessage = error.details[0].message.replace(/\"/g, "");
       return handleResponse(res, 400, cleanMessage);
     }
 
     // Verify token
     const token = req.header("Authorization")?.replace("Bearer ", "");
-    if (!token) return handleResponse(res, 401, "Authorization token required.");
+    if (!token)
+      return handleResponse(res, 401, "Authorization token required.");
 
     let decodedToken;
     try {
-      decodedToken = jwt.verify(token, process.env.JWT_SECRET || "your-secret-key");
+      decodedToken = jwt.verify(
+        token,
+        process.env.JWT_SECRET || "your-secret-key"
+      );
     } catch (err) {
       return handleResponse(res, 400, "Invalid or expired token.");
     }
@@ -59,13 +63,20 @@ const completeRegistrationAfterEmailVerification = async (req, res) => {
 
     // Generate and return new token
     const updatedToken = generateToken(user._id, user.email);
-    return handleResponse(res, 201, "Email verified and registration complete.", {
-      token: updatedToken,
-      ...user.toObject(),
-    });
+    return handleResponse(
+      res,
+      201,
+      "Email verified and registration complete.",
+      {
+        token: updatedToken,
+        ...user.toObject(),
+      }
+    );
   } catch (error) {
     console.error("Complete Registration error:", error);
-    return handleResponse(res, 500, "Something went wrong.", { error: error.message });
+    return handleResponse(res, 500, "Something went wrong.", {
+      error: error.message,
+    });
   }
 };
 
@@ -85,7 +96,11 @@ const verifyEmailForOTP = async (req, res) => {
       await sendOTPEmail(email, otp);
       await user.save();
 
-      return handleResponse(res, 200, 'OTP sent to your email. Please verify OTP to log in.');
+      return handleResponse(
+        res,
+        200,
+        "OTP sent to your email. Please verify OTP to log in."
+      );
     }
 
     const newUser = new User({
@@ -98,14 +113,18 @@ const verifyEmailForOTP = async (req, res) => {
     await sendOTPEmail(email, otp);
     await newUser.save();
 
-    return handleResponse(res, 200, 'OTP sent to your email for verification.');
+    return handleResponse(res, 200, "OTP sent to your email for verification.");
   } catch (error) {
     console.error("OTP email error : ", error);
     if (error.code === 11000) {
-      return handleResponse(res, 400, 'This email is already registered. Please log in instead.');
+      return handleResponse(
+        res,
+        400,
+        "This email is already registered. Please log in instead."
+      );
     }
-    return handleResponse(res, 500, 'Something went wrong. Please try again.');
-  };
+    return handleResponse(res, 500, "Something went wrong. Please try again.");
+  }
 };
 
 const loginUserWithOTP = async (req, res) => {
@@ -115,54 +134,80 @@ const loginUserWithOTP = async (req, res) => {
   let user = await User.findOne({ email });
 
   if (!user) {
-    return handleResponse(res, 404, 'Email not found.');
+    return handleResponse(res, 404, "Email not found.");
   }
 
   // Check if OTP matches
   if (user.otp !== otp) {
-    return handleResponse(res, 400, 'Invalid OTP. Please try again.');
+    return handleResponse(res, 400, "Invalid OTP. Please try again.");
   }
 
   // If user is new, mark them as verified and provide the token
   if (user.isNewUser) {
     user.isVerified = true;
-    user.otp = '';
+    user.otp = "";
     await user.save();
 
     const token = generateToken(user._id, user.email);
 
-    return handleResponse(res, 200, 'Logged in successfully and verified as new user.', { token, isNewUser: user.isNewUser });
+    return handleResponse(
+      res,
+      200,
+      "Logged in successfully and verified as new user.",
+      { token, isNewUser: user.isNewUser }
+    );
   }
 
   // If existing user, clear OTP and log them in
-  user.otp = '';
+  user.otp = "";
   await user.save();
 
   // Generate JWT token for the existing user
   const token = generateToken(user._id, user.email);
 
-  return handleResponse(res, 200, 'Logged in successfully via OTP.', { token, isNewUser: user.isNewUser });
+  return handleResponse(res, 200, "Logged in successfully via OTP.", {
+    token,
+    isNewUser: user.isNewUser,
+  });
 };
 
-const getUserDetails = async (req, res) => {
+const me = async (req, res) => {
   try {
     const userId = req.user.id;
-    const user = await User.findById(userId).select('-otp -__v');
+    const user = await User.findById(userId).select("-otp -__v");
 
     if (!user) {
-      return handleResponse(res, 404, 'User not found.');
+      return handleResponse(res, 404, "User not found.");
     }
 
     const userObj = user.toObject();
 
+    // Format date_of_birth
     if (userObj.date_of_birth) {
       userObj.date_of_birth = formatDate(userObj.date_of_birth);
     }
 
-    return handleResponse(res, 200, 'User details fetched successfully.', userObj);
+    // Replace location with human-readable place name
+    if (
+      userObj.location &&
+      userObj.location.coordinates &&
+      userObj.location.coordinates.length === 2
+    ) {
+      const [lng, lat] = userObj.location.coordinates;
+      userObj.location = await getPlaceName(lat, lng); // async reverse geocoding
+    } else {
+      userObj.location = "Location not set";
+    }
+
+    return handleResponse(
+      res,
+      200,
+      "User details fetched successfully.",
+      userObj
+    );
   } catch (error) {
-    console.error('Error in getUserDetails:', error);
-    return handleResponse(res, 500, 'Something went wrong.');
+    console.error("Error in getUserDetails:", error);
+    return handleResponse(res, 500, "Something went wrong.");
   }
 };
 
@@ -172,7 +217,9 @@ const getMatches = async (req, res) => {
     const currentUser = await User.findById(currentUserId);
 
     if (!currentUser) {
-      return res.status(404).json({ status: false, message: "User not found." });
+      return res
+        .status(404)
+        .json({ status: false, message: "User not found." });
     }
 
     // Extract criteria from current user
@@ -255,6 +302,8 @@ const getMatches = async (req, res) => {
   }
 };
 
+/*
+directly getting lat, long points, instead of place name
 const getAllUsers = async (req, res) => {
   try {
     const currentUserId = req.user.id;
@@ -284,7 +333,7 @@ const getAllUsers = async (req, res) => {
       return handleResponse(res, 400, "User location is not set properly.");
     }
 
-    const distanceInMeters = (preferred_match_distance || 50) * 1609.34;
+    const distanceInMeters = (preferred_match_distance || 50) * 1000; // ✅ convert preferred distance from km → meters
 
     const pipeline = [
       {
@@ -293,11 +342,11 @@ const getAllUsers = async (req, res) => {
             type: "Point",
             coordinates: location.coordinates,
           },
-          distanceField: "distance",
+          distanceField: "distance", // MongoDB returns in meters
           maxDistance: distanceInMeters,
           spherical: true,
           query: {
-            _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] }, // Exclude self, blocked, and reported users
+            _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] },
             isVerified: true,
             ...genderFilter,
           },
@@ -314,18 +363,25 @@ const getAllUsers = async (req, res) => {
           isNewUser: 0,
           isVerified: 0,
           email: 0,
+          randomSort: 0,
         },
       },
     ];
 
-    const users = await User.aggregate(pipeline);
+    let users = await User.aggregate(pipeline);
 
-    // Format date_of_birth if needed
-    for (const user of users) {
+    // ✅ Format date_of_birth & distance in km
+    users = users.map((user) => {
       if (user.date_of_birth) {
         user.date_of_birth = formatDate(user.date_of_birth);
       }
-    }
+
+      if (user.distance) {
+        user.distance = (user.distance / 1000).toFixed(2); // meters → km
+      }
+
+      return user;
+    });
 
     // Count total results
     const countPipeline = [
@@ -339,7 +395,140 @@ const getAllUsers = async (req, res) => {
           maxDistance: distanceInMeters,
           spherical: true,
           query: {
-            _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] }, // Exclude self, blocked, and reported users
+            _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] },
+            isVerified: true,
+            ...genderFilter,
+          },
+        },
+      },
+      { $count: "total" },
+    ];
+
+    const countResult = await User.aggregate(countPipeline);
+    const totalItems = countResult[0]?.total || 0;
+    const totalPages = Math.ceil(totalItems / perPage);
+
+    return handleResponse(res, 200, "Filtered users fetched successfully.", {
+      results: users,
+      totalItems,
+      currentPage: Number(page),
+      totalPages,
+      totalItemsOnCurrentPage: users.length,
+    });
+  } catch (error) {
+    console.error("Error in getAllUsers:", error);
+    return handleResponse(res, 500, "Something went wrong.");
+  }
+};
+*/
+
+//get Location name using lat, long
+const getAllUsers = async (req, res) => {
+  try {
+    const currentUserId = req.user.id;
+    const { page = 1, perPage = 6 } = req.query;
+    const skip = (page - 1) * perPage;
+
+    // Fetch blocked and reported users
+    const userInteraction = await UserInteraction.findOne({
+      userId: currentUserId,
+    });
+    const blockedUserIds =
+      userInteraction?.blockedUsers.map((u) => u.targetUserId) || [];
+    const reportedUserIds =
+      userInteraction?.reportedUsers.map((r) => r.targetUserId) || [];
+
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser || !currentUser.isVerified) {
+      return handleResponse(res, 404, "User not found or not verified.");
+    }
+
+    const { show_me, preferred_match_distance, location } = currentUser;
+
+    // Gender filter logic
+    let genderFilter = {};
+    if (show_me === "men") genderFilter.gender = "male";
+    else if (show_me === "women") genderFilter.gender = "female";
+
+    if (
+      !location ||
+      !location.coordinates ||
+      location.coordinates.length !== 2
+    ) {
+      return handleResponse(res, 400, "User location is not set properly.");
+    }
+
+    const distanceInMeters = (preferred_match_distance || 50) * 1000;
+
+    const pipeline = [
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: location.coordinates,
+          },
+          distanceField: "distance",
+          maxDistance: distanceInMeters,
+          spherical: true,
+          query: {
+            _id: {
+              $ne: currentUser._id,
+              $nin: [...blockedUserIds, ...reportedUserIds],
+            },
+            isVerified: true,
+            ...genderFilter,
+          },
+        },
+      },
+      { $addFields: { randomSort: { $rand: {} } } },
+      { $sort: { randomSort: 1 } },
+      { $skip: skip },
+      { $limit: Number(perPage) },
+      {
+        $project: {
+          otp: 0,
+          __v: 0,
+          isNewUser: 0,
+          isVerified: 0,
+          email: 0,
+          randomSort: 0,
+        },
+      },
+    ];
+
+    let users = await User.aggregate(pipeline);
+
+    // Convert lat/lon to place names & format distance/date
+    for (let user of users) {
+      if (user.date_of_birth) {
+        user.date_of_birth = formatDate(user.date_of_birth);
+      }
+
+      if (user.distance) {
+        user.distance = (user.distance / 1000).toFixed(2);
+      }
+
+      if (user.location && user.location.coordinates) {
+        const [lon, lat] = user.location.coordinates;
+        user.location = await getPlaceName(lat, lon); // Convert to place name
+      } else {
+        user.location = "Unknown location";
+      }
+    }
+
+    // Count total items
+    const countPipeline = [
+      {
+        $geoNear: {
+          near: { type: "Point", coordinates: location.coordinates },
+          distanceField: "distance",
+          maxDistance: distanceInMeters,
+          spherical: true,
+          query: {
+            _id: {
+              $ne: currentUser._id,
+              $nin: [...blockedUserIds, ...reportedUserIds],
+            },
             isVerified: true,
             ...genderFilter,
           },
@@ -365,6 +554,91 @@ const getAllUsers = async (req, res) => {
   }
 };
 
+const getUserDetailsByUserId = async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const currentUserId = req.user.id;
+
+    const currentUser = await User.findById(currentUserId);
+    if (!currentUser || !currentUser.isVerified) {
+      return handleResponse(res, 404, "User not found or not verified.");
+    }
+
+    const { location, preferred_match_distance, show_me } = currentUser;
+
+    if (
+      !location ||
+      !location.coordinates ||
+      location.coordinates.length !== 2
+    ) {
+      return handleResponse(res, 400, "User location not set.");
+    }
+
+    const maxDistance = (preferred_match_distance || 50) * 1000; // km → meters
+
+    const pipeline = [
+      {
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: location.coordinates,
+          },
+          distanceField: "distance",
+          spherical: true,
+          maxDistance: maxDistance,
+          query: {
+            _id: new mongoose.Types.ObjectId(userId),
+            isVerified: true,
+          },
+        },
+      },
+      {
+        $project: {
+          otp: 0,
+          isNewUser: 0,
+          __v: 0,
+          createdAt: 0,
+          updatedAt: 0,
+          profileCompleteness: 0,
+        },
+      },
+    ];
+
+    const results = await User.aggregate(pipeline);
+    if (!results.length) {
+      return handleResponse(res, 404, "User not found or outside range.");
+    }
+
+    const requestedUser = results[0];
+
+    // Convert distance to km
+    requestedUser.distance = (requestedUser.distance / 1000).toFixed(2);
+
+    // Format DOB
+    if (requestedUser.date_of_birth) {
+      requestedUser.date_of_birth = formatDate(requestedUser.date_of_birth);
+    }
+
+    // Add human-readable location name
+    if (
+      requestedUser.location &&
+      requestedUser.location.coordinates &&
+      requestedUser.location.coordinates.length === 2
+    ) {
+      const [lng, lat] = requestedUser.location.coordinates;
+      requestedUser.location = await getPlaceName(lat, lng);
+    } else {
+      requestedUser.location = "Location not set";
+    }
+
+    return handleResponse(res, 200, "User details fetched successfully.", requestedUser);
+  } catch (error) {
+    console.error("Error in getUserDetailsByUserId:", error);
+    return handleResponse(res, 500, "Something went wrong.");
+  }
+};
+/*
+//before 05 Nov 2025
 const filterUsers = async (req, res) => {
   try {
     const userId = req.user.id;
@@ -561,206 +835,436 @@ const filterUsers = async (req, res) => {
     return handleResponse(res, 500, "Something went wrong.");
   }
 };
+*/
 
-const likeUser = async (req, res) => {
+//05/Nov/2025 some filter not working has been implemented
+const filterUsersSS = async (req, res) => {
   try {
-    const { targetUserId } = req.params; // Extract from URL params
     const userId = req.user.id;
 
-    // Validate targetUserId
-    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-      return handleResponse(res, 400, "Invalid target user ID format.");
+    const userInteraction = await UserInteraction.findOne({ userId });
+    const blockedUserIds =
+      userInteraction?.blockedUsers.map((user) => user.targetUserId) || [];
+    const reportedUserIds =
+      userInteraction?.reportedUsers.map((report) => report.targetUserId) || [];
+
+    const query = { q: "", page: 1, perPage: 10, ...req.query };
+    const {
+      q,
+      gender,
+      sexual_orientation,
+      show_me,
+      minAge,
+      maxAge,
+      preferred_match_distance,
+      height,
+      hasPets,
+      interests,
+      lat,
+      lng,
+      page,
+      perPage,
+    } = query;
+    const normalizeValue = (val) => {
+      if (typeof val === "string") {
+        return val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
+      }
+      return val;
+    };
+
+    const matchStage = {
+      _id: {
+        $ne: new mongoose.Types.ObjectId(String(userId)),
+        $nin: [...blockedUserIds, ...reportedUserIds],
+      },
+      isVerified: true,
+    };
+
+    if (q) {
+      const regex = new RegExp(q, "i");
+      matchStage.$or = [
+        { name: regex },
+        { bio: regex },
+        { profession: regex },
+        { education: regex },
+        { interest: { $in: [regex] } },
+      ];
     }
 
-    // Check if target user exists
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser) {
-      return handleResponse(res, 404, "Target user not found.");
-    }
-
-    // Find or create the user's interaction document
-    let userInteraction = await UserInteraction.findOne({ userId });
-    if (!userInteraction) {
-      userInteraction = await UserInteraction.create({
-        userId,
-        likedUsers: [],
-        dislikedUsers: [],
-      });
-    }
-
-    // Check if the targetUserId is already in likedUsers
-    const alreadyLiked = userInteraction.likedUsers.some(
-      (user) => user.targetUserId.toString() === targetUserId
-    );
-    if (alreadyLiked) {
-      return handleResponse(res, 200, "You have already liked this user.");
-    }
-
-    // Add the targetUserId to likedUsers
-    userInteraction.likedUsers.push({ targetUserId });
-    await userInteraction.save();
-
-    return handleResponse(res, 201, "User liked successfully.");
-  } catch (error) {
-    console.error("Error in likeUser:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-
-const dislikeUser = async (req, res) => {
-  try {
-    const { targetUserId } = req.params; // Extract from URL params
-    const userId = req.user.id;
-
-    // Validate targetUserId
-    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-      return handleResponse(res, 400, "Invalid target user ID format.");
-    }
-
-    // Check if target user exists
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser) {
-      return handleResponse(res, 404, "Target user not found.");
-    }
-
-    // Find or create the user's interaction document
-    let userInteraction = await UserInteraction.findOne({ userId });
-    if (!userInteraction) {
-      userInteraction = await UserInteraction.create({
-        userId,
-        likedUsers: [],
-        dislikedUsers: [],
-      });
-    }
-
-    // Check if the targetUserId is already in dislikedUsers
-    const alreadyDisliked = userInteraction.dislikedUsers.some(
-      (user) => user.targetUserId.toString() === targetUserId
-    );
-    if (alreadyDisliked) {
-      return handleResponse(res, 200, "You have already disliked this user.");
-    }
-
-    // Add the targetUserId to dislikedUsers
-    userInteraction.dislikedUsers.push({ targetUserId });
-    await userInteraction.save();
-
-    return handleResponse(res, 201, "User disliked successfully.");
-  } catch (error) {
-    console.error("Error in dislikeUser:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-
-const blockUser = async (req, res) => {
-  try {
-    const { targetUserId } = req.params;
-    const userId = req.user.id;
-
-    if (!mongoose.Types.ObjectId.isValid(targetUserId)) {
-      return handleResponse(res, 400, "Invalid target user ID format.");
-    }
-
-    const targetUser = await User.findById(targetUserId);
-    if (!targetUser) {
-      return handleResponse(res, 404, "Target user not found.");
-    }
-
-    let userInteraction = await UserInteraction.findOne({ userId });
-    if (!userInteraction) {
-      userInteraction = await UserInteraction.create({
-        userId,
-        likedUsers: [],
-        dislikedUsers: [],
-        blockedUsers: [],
-      });
-    }
-
-    const alreadyBlocked = userInteraction.blockedUsers.some(
-      (user) => user.targetUserId.toString() === targetUserId
-    );
-    if (alreadyBlocked) {
-      return handleResponse(res, 200, "You have already blocked this user.");
-    }
-
-    userInteraction.blockedUsers.push({ targetUserId });
-    await userInteraction.save();
-
-    return handleResponse(res, 201, "User blocked successfully.");
-  } catch (error) {
-    console.error("Error in blockUser:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-
-const reportUser = async (req, res) => {
-  try {
-    const { reportedUserId } = req.params;
-    const { reason, details } = req.body;
-    const reporterId = req.user.id;
-
-    // Validate request body using Joi
-    const { error } = reportUserValidator.validate({ reason, details });
-    if (error) {
-      const cleanMessage = error.details[0].message.replace(/\"/g, "");
-      return handleResponse(res, 400, cleanMessage);
-    }
-
-    // Validate reportedUserId
-    if (!mongoose.Types.ObjectId.isValid(reportedUserId)) {
-      return handleResponse(res, 400, "Invalid reported user ID format.");
-    }
-
-    // Check if reported user exists
-    const reportedUser = await User.findById(reportedUserId);
-    if (!reportedUser) {
-      return handleResponse(res, 404, "Reported user not found.");
-    }
-
-    // Check if the reporter is trying to report themselves
-    if (reporterId === reportedUserId) {
-      return handleResponse(res, 400, "You cannot report yourself.");
-    }
-
-    // Find or create the user's interaction document
-    let userInteraction = await UserInteraction.findOne({ userId: reporterId });
-    if (!userInteraction) {
-      userInteraction = await UserInteraction.create({
-        userId: reporterId,
-        likedUsers: [],
-        dislikedUsers: [],
-        blockedUsers: [],
-        reportedUsers: [],
-      });
-    }
-
-    // Check if the user has already reported the same user for the same reason
-    const alreadyReported = userInteraction.reportedUsers.some(
-      (report) =>
-        report.targetUserId.toString() === reportedUserId &&
-        report.reason === reason
-    );
-
-    if (alreadyReported) {
-      return handleResponse(
-        res,
-        200,
-        "You have already reported this user for the same reason."
+    // ✅ FIX 1: sexual_orientation should match case-insensitively
+    if (sexual_orientation) {
+      matchStage.sexual_orientation = new RegExp(
+        `^${sexual_orientation}$`,
+        "i"
       );
     }
 
-    // Add the report to reportedUsers
-    userInteraction.reportedUsers.push({
-      targetUserId: reportedUserId,
-      reason,
-      details: details || "",
+    const exactFilters = [
+      "smoking",
+      "drinking",
+      "diet",
+      "hasKids",
+      "wantsKids",
+      "relationshipGoals",
+    ];
+
+    exactFilters.forEach((field) => {
+      if (query[field]) {
+        matchStage[field] = normalizeValue(query[field]);
+      }
     });
 
-    await userInteraction.save();
+    const regexFilters = [
+      "body_type",
+      "religion",
+      "caste",
+      "profession",
+      "education",
+    ];
+    regexFilters.forEach((field) => {
+      if (query[field]) {
+        matchStage[field] = new RegExp(`^${query[field]}$`, "i");
+      }
+    });
 
-    return handleResponse(res, 201, "User reported successfully.");
+    // ✅ FIX 2: height filter → less than or equal to given value
+    if (height) {
+      const h = Number(height);
+      matchStage.height = { $lte: h };
+    }
+
+    if (hasPets !== undefined) {
+      matchStage.hasPets = hasPets === "true";
+    }
+
+    // ✅ FIX 4: minAge & maxAge logic corrected
+    if (minAge || maxAge) {
+      const today = new Date();
+      const minDOB = maxAge
+        ? new Date(
+            today.getFullYear() - Number(maxAge),
+            today.getMonth(),
+            today.getDate()
+          )
+        : null;
+      const maxDOB = minAge
+        ? new Date(
+            today.getFullYear() - Number(minAge),
+            today.getMonth(),
+            today.getDate()
+          )
+        : null;
+
+      matchStage.date_of_birth = {};
+      if (minDOB) matchStage.date_of_birth.$gte = minDOB;
+      if (maxDOB) matchStage.date_of_birth.$lte = maxDOB;
+    }
+
+    if (interests) {
+      const interestArray = interests
+        .split(",")
+        .map((i) => i.trim().toLowerCase());
+      matchStage.interest = { $in: interestArray };
+    }
+
+    if (show_me) {
+      if (show_me.toLowerCase() === "men") {
+        matchStage.gender = "male";
+      } else if (show_me.toLowerCase() === "women") {
+        matchStage.gender = "female";
+      } else {
+        delete matchStage.gender;
+      }
+    } else if (gender) {
+      matchStage.gender = gender.toLowerCase();
+    }
+
+    const skip = (Number(page) - 1) * Number(perPage);
+    let pipeline = [];
+
+    // ✅ FIX 3: preferred_match_distance → only within <= distance
+    if (
+      lat !== undefined &&
+      lng !== undefined &&
+      preferred_match_distance !== undefined
+    ) {
+      const distanceInMeters = Number(preferred_match_distance) * 1609.34;
+      pipeline.push({
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: [parseFloat(lng), parseFloat(lat)],
+          },
+          distanceField: "distance",
+          maxDistance: distanceInMeters, // ensures <= distance only
+          spherical: true,
+          query: matchStage,
+        },
+      });
+    } else {
+      pipeline.push({ $match: matchStage });
+    }
+
+    pipeline.push(
+      { $skip: skip },
+      { $limit: Number(perPage) },
+      {
+        $project: {
+          otp: 0,
+          __v: 0,
+          isNewUser: 0,
+          isVerified: 0,
+          email: 0,
+        },
+      }
+    );
+
+    const users = await User.aggregate(pipeline);
+
+    for (const user of users) {
+      if (user.date_of_birth) {
+        user.date_of_birth = formatDate(user.date_of_birth);
+      }
+    }
+
+    if (user.location && user.location.coordinates && user.location.coordinates.length === 2) {
+    const [lng, lat] = user.location.coordinates;
+    user.location = await getPlaceName(lat, lng);
+      } else {
+    user.location = "Location not set";
+     }
+  
+    let totalItems;
+    if (
+      lat !== undefined &&
+      lng !== undefined &&
+      preferred_match_distance !== undefined
+    ) {
+      const countPipeline = [
+        {
+          $geoNear: {
+            near: {
+              type: "Point",
+              coordinates: [parseFloat(lng), parseFloat(lat)],
+            },
+            distanceField: "distance",
+            maxDistance: Number(preferred_match_distance) * 1609.34,
+            spherical: true,
+            query: matchStage,
+          },
+        },
+        { $count: "total" },
+      ];
+      const countResult = await User.aggregate(countPipeline);
+      totalItems = countResult[0]?.total || 0;
+    } else {
+      totalItems = await User.countDocuments(matchStage);
+    }
+
+    const totalPages = Math.ceil(totalItems / perPage);
+
+    return handleResponse(res, 200, "Filtered users fetched successfully.", {
+      results: users,
+      totalItems,
+      currentPage: Number(page),
+      totalPages,
+      totalItemsOnCurrentPage: users.length,
+    });
   } catch (error) {
-    console.error("Error in reportUser:", error);
+    console.error("Error in filterUsers:", error);
+    return handleResponse(res, 500, "Something went wrong.");
+  }
+};
+
+//location name included, time consuming
+const filterUsers = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const userInteraction = await UserInteraction.findOne({ userId });
+    const blockedUserIds =
+      userInteraction?.blockedUsers.map((user) => user.targetUserId) || [];
+    const reportedUserIds =
+      userInteraction?.reportedUsers.map((report) => report.targetUserId) || [];
+
+    const query = { q: "", page: 1, perPage: 10, ...req.query };
+    const {q, gender, sexual_orientation, show_me, minAge, maxAge, preferred_match_distance, height, hasPets, interests,
+      lat, lng, page, perPage, } = query;
+
+    const normalizeValue = (val) => {
+      if (typeof val === "string") {
+        return val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
+      }
+      return val;
+    };
+
+    const matchStage = {
+      _id: {
+        $ne: new mongoose.Types.ObjectId(String(userId)),
+        $nin: [...blockedUserIds, ...reportedUserIds],
+      },
+      isVerified: true,
+    };
+
+    if (q) {
+      const regex = new RegExp(q, "i");
+      matchStage.$or = [
+        { name: regex },
+        { bio: regex },
+        { profession: regex },
+        { education: regex },
+        { interest: { $in: [regex] } },
+      ];
+    }
+
+    if (sexual_orientation) {
+      matchStage.sexual_orientation = new RegExp(
+        `^${sexual_orientation}$`,
+        "i"
+      );
+    }
+
+    const exactFilters = [ "smoking", "drinking", "diet", "hasKids", "wantsKids", "relationshipGoals" ];
+    exactFilters.forEach((field) => {
+      if (query[field]) {
+        matchStage[field] = normalizeValue(query[field]);
+      }
+    });
+
+    const regexFilters = [ "body_type", "religion", "caste", "profession", "education" ];
+    regexFilters.forEach((field) => {
+      if (query[field]) {
+        matchStage[field] = new RegExp(`^${query[field]}$`, "i");
+      }
+    });
+
+    if (height) {
+      const h = Number(height);
+      matchStage.height = { $lte: h };
+    }
+
+    if (hasPets !== undefined) {
+      matchStage.hasPets = hasPets === "true";
+    }
+
+    if (minAge || maxAge) {
+      const today = new Date();
+      const minDOB = maxAge
+        ? new Date(today.getFullYear() - Number(maxAge), today.getMonth(), today.getDate())
+        : null;
+      const maxDOB = minAge
+        ? new Date(today.getFullYear() - Number(minAge), today.getMonth(), today.getDate())
+        : null;
+
+      matchStage.date_of_birth = {};
+      if (minDOB) matchStage.date_of_birth.$gte = minDOB;
+      if (maxDOB) matchStage.date_of_birth.$lte = maxDOB;
+    }
+
+    if (interests) {
+      const interestArray = interests
+        .split(",")
+        .map((i) => i.trim().toLowerCase());
+      matchStage.interest = { $in: interestArray };
+    }
+
+    if (show_me) {
+      if (show_me.toLowerCase() === "men") {
+        matchStage.gender = "male";
+      } else if (show_me.toLowerCase() === "women") {
+        matchStage.gender = "female";
+      } else {
+        delete matchStage.gender;
+      }
+    } else if (gender) {
+      matchStage.gender = gender.toLowerCase();
+    }
+
+    const skip = (Number(page) - 1) * Number(perPage);
+    let pipeline = [];
+
+    if (lat !== undefined && lng !== undefined && preferred_match_distance !== undefined) {
+      const distanceInMeters = Number(preferred_match_distance) * 1609.34;
+      pipeline.push({
+        $geoNear: {
+          near: {
+            type: "Point",
+            coordinates: [parseFloat(lng), parseFloat(lat)],
+          },
+          distanceField: "distance",
+          maxDistance: distanceInMeters,
+          spherical: true,
+          query: matchStage,
+        },
+      });
+    } else {
+      pipeline.push({ $match: matchStage });
+    }
+
+    pipeline.push(
+      { $skip: skip },
+      { $limit: Number(perPage) },
+      {
+        $project: {
+          otp: 0,
+          __v: 0,
+          isNewUser: 0,
+          isVerified: 0,
+          email: 0,
+        },
+      }
+    );
+
+    const users = await User.aggregate(pipeline);
+
+    // Format DOB and get human-readable location
+    for (const user of users) {
+      if (user.date_of_birth) {
+        user.date_of_birth = formatDate(user.date_of_birth);
+      }
+
+      if (user.location && user.location.coordinates && user.location.coordinates.length === 2) {
+        const [lng, lat] = user.location.coordinates;
+        user.location = await getPlaceName(lat, lng);
+      } else {
+        user.location = "Location not set";
+      }
+    }
+
+    let totalItems;
+    if (lat !== undefined && lng !== undefined && preferred_match_distance !== undefined) {
+      const countPipeline = [
+        {
+          $geoNear: {
+            near: {
+              type: "Point",
+              coordinates: [parseFloat(lng), parseFloat(lat)],
+            },
+            distanceField: "distance",
+            maxDistance: Number(preferred_match_distance) * 1609.34,
+            spherical: true,
+            query: matchStage,
+          },
+        },
+        { $count: "total" },
+      ];
+      const countResult = await User.aggregate(countPipeline);
+      totalItems = countResult[0]?.total || 0;
+    } else {
+      totalItems = await User.countDocuments(matchStage);
+    }
+
+    const totalPages = Math.ceil(totalItems / perPage);
+
+    return handleResponse(res, 200, "Filtered users fetched successfully.", {
+      results: users,
+      totalItems,
+      currentPage: Number(page),
+      totalPages,
+      totalItemsOnCurrentPage: users.length,
+    });
+  } catch (error) {
+    console.error("Error in filterUsers:", error);
     return handleResponse(res, 500, "Something went wrong.");
   }
 };
@@ -769,12 +1273,9 @@ export const user = {
   verifyEmailForOTP,
   completeRegistrationAfterEmailVerification,
   loginUserWithOTP,
-  getUserDetails,
+  me,
+  getUserDetailsByUserId,
   getMatches,
   getAllUsers,
   filterUsers,
-  likeUser,
-  dislikeUser,
-  blockUser,
-  reportUser
 };

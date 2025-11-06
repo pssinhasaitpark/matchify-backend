@@ -15,18 +15,13 @@ router.post('/complete-registration', verifyToken, imageConversionMiddlewareMult
 // Route to login with OTP (for existing users) and return isNewUser status
 router.post('/login-with-otp', user.loginUserWithOTP);
 
-router.get('/details', verifyToken, user.getUserDetails);
+router.get('/me', verifyToken, user.me);
 
 router.get("/all", verifyToken, user.getAllUsers);
 
 router.get("/filter", verifyToken, user.filterUsers);
 
-router.post("/like/:targetUserId", verifyToken, user.likeUser);
+router.get('/:userId', verifyToken, user.getUserDetailsByUserId);
 
-router.post("/dislike/:targetUserId", verifyToken, user.dislikeUser);
-
-router.post("/block/:targetUserId", verifyToken, user.blockUser);
-
-router.post("/report/:reportedUserId", verifyToken, user.reportUser);
 
 export default router;

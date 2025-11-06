@@ -1,4 +1,4 @@
-// //app/validators/user.js
+//app/validators/user.js
 import Joi from "joi";
 
 export const userRegistrationValidator = Joi.object({
@@ -63,7 +63,7 @@ export const userRegistrationValidator = Joi.object({
   wantsKids: Joi.string().valid("Yes", "No", "Maybe").optional(),
   hasPets: Joi.alternatives().try(Joi.boolean(), Joi.string()).optional(),
   relationshipGoals: Joi.string()
-    .valid("CasualDating", "SeriousRelationship", "Marriage", "OpenToExplore")
+    .valid("Casual Dating", "Serious Relationship", "Marriage", "Open to explore")
     .optional(),
 
   images: Joi.array().items(Joi.string().uri()).optional(),
@@ -77,21 +77,4 @@ export const userRegistrationValidator = Joi.object({
       "any.required": "Mobile number is required.",
     }),
 
-});
-
-export const reportUserValidator = Joi.object({
-  reason: Joi.string()
-    .valid("spam", "harassment", "fake_profile", "inappropriate_content", "scam", "other")
-    .required()
-    .messages({
-      "any.only": "Invalid report reason. Valid reasons are: spam, harassment, fake_profile, inappropriate_content, scam, other.",
-      "any.required": "Report reason is required.",
-    }),
-  details: Joi.string()
-    .optional()
-    .allow("")
-    .max(500)
-    .messages({
-      "string.max": "Details cannot exceed 500 characters.",
-    }),
 });

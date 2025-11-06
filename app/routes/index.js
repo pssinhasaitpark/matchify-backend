@@ -2,11 +2,19 @@
 import userRoutes from "./user.js";
 import passport from "passport";
 import socialAuthRoutes from "./socialAuth.js";
+import likeRoutes from "./userAction/like.js";
+import dislikeRoutes from "./userAction/dislike.js";
+import blockRoutes from "./userAction/block.js";
+import reportRoutes from "./userAction/report.js";
 
 const setupRoutes = (app) => {
-    app.use(passport.initialize());
-    app.use("/api/v1/user", userRoutes);
-    app.use("/auth", socialAuthRoutes);
+  app.use(passport.initialize());
+  app.use("/api/v1/user", userRoutes);
+  app.use("/auth", socialAuthRoutes);
+  app.use("/api/v1/user-action/like", likeRoutes);
+  app.use("/api/v1/user-action/dislike", dislikeRoutes);
+  app.use("/api/v1/user-action/block", blockRoutes);
+  app.use("/api/v1/user-action/report", reportRoutes);
 };
 
 export default setupRoutes;
