@@ -344,76 +344,96 @@ const getUserWithCommunitiesInCommon = async (req, res) => {
 const getRecommendedUsers = async (req, res) => {
   try {
     const currentUserId = req.user.id;
+    const { page = 1, perPage = 6 } = req.query;
+    const skip = (page - 1) * perPage;
 
-    // 1️⃣ Fetch current user
+    // 1. Fetch current user
     const currentUser = await User.findById(currentUserId);
-    if (!currentUser) {
-      return res.status(404).json({
-        success: false,
-        error: true,
-        message: "Current user not found.",
-      });
+    if (!currentUser || !currentUser.isVerified) {
+      return handleResponse(res, 404, "Current user not found or not verified.");
     }
 
-    // 2️⃣ Fetch other users
-    const users = await User.find({
-      _id: { $ne: currentUserId },
+    // 2. Fetch blocked and reported users
+    const blockedUsers = await Block.find({ userId: currentUserId }).select("targetUserId");
+    const reportedUsers = await Report.find({ reporterId: currentUserId }).select("reportedUserId");
+    const blockedIds = blockedUsers.map((b) => b.targetUserId);
+    const reportedIds = reportedUsers.map((r) => r.reportedUserId);
+
+    // 3. Gender filter
+    let genderFilter = {};
+    if (currentUser.show_me === "men") genderFilter.gender = "male";
+    else if (currentUser.show_me === "women") genderFilter.gender = "female";
+
+    // 4. Fetch all potential matches (excluding blocked/reported users)
+    const allUsers = await User.find({
+      _id: { $ne: currentUserId, $nin: [...blockedIds, ...reportedIds] },
       isVerified: true,
-    }).select("name date_of_birth images location interest relationshipGoals religion caste");
+      ...genderFilter,
+    }).select("name date_of_birth images location interest relationshipGoals religion caste gender");
 
-    // 3️⃣ Process each user
-    const recommendedUsers = users.map((user) => {
-      const userInterests = Array.isArray(user.interest) ? user.interest : [];
-      const userRelationshipGoal = user.relationshipGoals || "";
-      const userCommunities = [user.religion, user.caste].filter(Boolean);
+    // 5. Calculate compatibility scores and filter out users with score = 0
+    let recommendedUsers = allUsers
+      .map((user) => {
+        const userInterests = Array.isArray(user.interest) ? user.interest : [];
+        const userRelationshipGoal = user.relationshipGoals || "";
+        const userCommunities = [user.religion, user.caste].filter(Boolean);
+        const currentUserInterests = Array.isArray(currentUser.interest) ? currentUser.interest : [];
+        const currentUserRelationshipGoal = currentUser.relationshipGoals || "";
+        const currentUserCommunities = [currentUser.religion, currentUser.caste].filter(Boolean);
 
-      const currentUserInterests = Array.isArray(currentUser.interest) ? currentUser.interest : [];
-      const currentUserRelationshipGoal = currentUser.relationshipGoals || "";
-      const currentUserCommunities = [currentUser.religion, currentUser.caste].filter(Boolean);
+        // Calculate commonalities
+        const commonInterest = userInterests.filter((i) => currentUserInterests.includes(i));
+        const commonRelationshipGoals = userRelationshipGoal === currentUserRelationshipGoal ? 1 : 0;
+        const commonCommunities = userCommunities.filter((c) => currentUserCommunities.includes(c));
 
-      // Compare
-      const commonInterest = userInterests.filter((i) => currentUserInterests.includes(i));
-      const commonRelationshipGoals =
-        userRelationshipGoal === currentUserRelationshipGoal ? [userRelationshipGoal] : [];
-      const commonCommunities = userCommunities.filter((c) => currentUserCommunities.includes(c));
+        // Assign weights
+        const interestScore = commonInterest.length * 2;
+        const relationshipScore = commonRelationshipGoals * 3;
+        const communityScore = commonCommunities.length * 1;
 
-      const totalCommonCount =
-        commonInterest.length +
-        commonRelationshipGoals.length +
-        commonCommunities.length;
+        // Total compatibility score
+        const totalCommonCount = interestScore + relationshipScore + communityScore;
 
-      return {
-        _id: user._id,
-        name: user.name,
-        age: user.date_of_birth ? calculateAge(user.date_of_birth) : null,
-        images: user.images || [],
-        location: user.location || null,
-        commonInterest,
-        commonRelationshipGoals,
-        commonCommunities,
-        totalCommonCount,
-      };
-    });
+        return {
+          _id: user._id,
+          name: user.name,
+          age: user.date_of_birth ? calculateAge(user.date_of_birth) : null,
+          images: user.images?.[0] || null,
+          location: user.location,
+          commonInterest,
+          commonRelationshipGoals: commonRelationshipGoals ? [userRelationshipGoal] : [],
+          commonCommunities,
+          totalCommonCount,
+        };
+      })
+      .filter((user) => user.totalCommonCount > 0); // Exclude users with score = 0
 
-    // 4️⃣ Sort by relevance
-    const sortedRecommendations = recommendedUsers.sort(
-      (a, b) => b.totalCommonCount - a.totalCommonCount
+    // 6. Shuffle the recommendations to display in random order
+    const shuffledRecommendations = recommendedUsers.sort(() => Math.random() - 0.5);
+
+    // 7. Resolve location names and format response
+    const formattedUsers = await Promise.all(
+      shuffledRecommendations.slice(skip, skip + perPage).map(async (user) => {
+        let locationName = "Unknown Location";
+        if (user.location?.coordinates?.length === 2) {
+          const [lng, lat] = user.location.coordinates;
+          locationName = await getPlaceName(lat, lng);
+        }
+        return { ...user, location: locationName };
+      })
     );
 
-    // 5️⃣ Send response
-    res.status(200).json({
-      success: true,
-      error: false,
-      message: "Recommended users fetched successfully.",
-      results: sortedRecommendations,
+    // 8. Send paginated response
+    return handleResponse(res, 200, "Recommended users fetched successfully.", {
+      results: formattedUsers,
+      totalItems: shuffledRecommendations.length,
+      currentPage: Number(page),
+      totalPages: Math.ceil(shuffledRecommendations.length / perPage),
+      totalItemsOnCurrentPage: formattedUsers.length,
     });
   } catch (error) {
     console.error("Error in getRecommendedUsers:", error);
-    res.status(500).json({
-      success: false,
-      error: true,
-      message: "Something went wrong while fetching recommended users.",
-    });
+    return handleResponse(res, 500, "Something went wrong while fetching recommended users.");
   }
 };
 
