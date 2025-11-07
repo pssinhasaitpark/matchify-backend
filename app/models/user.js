@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema(
     date_of_birth: { type: Date, required: false },
     gender: { type: String, enum: ["male", "female", "other"], required: false },
 
-    sexual_orientation: { type: String, enum: ["straight", "gay", "bisexual", "other"], default: null },
+    sexual_orientation: { type: String, default: null },
 
     location: {
       type: {
@@ -58,8 +58,6 @@ const userSchema = new mongoose.Schema(
     profileCompleteness: { type: Number, default: 0 },
     lastActiveAt: { type: Date, default: Date.now },
 
-    // likedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    // dislikedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     // googleId: { type: String, default: null },
   },
   { timestamps: true }

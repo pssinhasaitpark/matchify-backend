@@ -51,14 +51,14 @@ const completeRegistrationAfterEmailVerification = async (req, res) => {
     }
 
     // Check if mobile number is already in use (by another user)
-    const existingMobile = await User.findOne({
-      mobile_number: body.mobile_number,
-      _id: { $ne: user._id }, // Exclude current user
-    });
+    // const existingMobile = await User.findOne({
+    //   mobile_number: body.mobile_number,
+    //   _id: { $ne: user._id }, // Exclude current user
+    // });
 
-    if (existingMobile) {
-      return handleResponse(res, 400, "Mobile number already in use.");
-    }
+    // if (existingMobile) {
+    //   return handleResponse(res, 400, "Mobile number already in use.");
+    // }
 
     // Assign fields
     assignUserFields(user, body, req);

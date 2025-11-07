@@ -20,7 +20,7 @@ export const userRegistrationValidator = Joi.object({
     "any.required": "Gender is required.",
   }),
 
-  sexual_orientation: Joi.string().valid("straight", "gay", "bisexual", "other").optional(),
+  sexual_orientation: Joi.string().optional(),
 
   location: Joi.alternatives()
     .try(
