@@ -1,10 +1,9 @@
 //app/controllers/user.js
 import { User } from "../models/user.js";
-import { Like } from "../models/userAction/like.js";
 import { Block } from "../models/userAction/block.js";
 import { Report } from "../models/userAction/report.js";
 import { userRegistrationValidator } from "../validators/user.js";
-import { calculateAge, sendOTPEmail } from "../utils/helper.js";
+import { sendOTPEmail } from "../utils/helper.js";
 import { handleResponse } from "../utils/helper.js";
 import { formatDate } from "../utils/dateFormatter.js";
 import { generateToken } from "../middlewares/jwtAuth.js";
@@ -62,6 +61,27 @@ const completeRegistrationAfterEmailVerification = async (req, res) => {
 
     // Assign fields
     assignUserFields(user, body, req);
+
+    // If location coordinates are set, fetch place name
+    if (
+      user.location &&
+      user.location.coordinates &&
+      user.location.coordinates.length === 2
+    ) {
+      const [lng, lat] = user.location.coordinates;
+
+      if (
+        !user.location.place_name ||
+        user.location.place_name === "Location not set"
+      ) {
+        // ✅ placeData is a string like "Rau Tahsil"
+        const placeData = await getPlaceName(lat, lng);
+        console.log("Fetched City:", placeData);
+
+        user.location.place_name = placeData || "Unknown";
+      }
+    }
+
     await user.save();
 
     // Generate and return new token
@@ -190,14 +210,9 @@ const me = async (req, res) => {
       userObj.date_of_birth = formatDate(userObj.date_of_birth);
     }
 
-    // Replace location with human-readable place name
-    if (
-      userObj.location &&
-      userObj.location.coordinates &&
-      userObj.location.coordinates.length === 2
-    ) {
-      const [lng, lat] = userObj.location.coordinates;
-      userObj.location = await getPlaceName(lat, lng); // async reverse geocoding
+    // Set location as human-readable place_name
+    if (userObj.location && userObj.location.place_name) {
+      userObj.location = userObj.location.place_name;
     } else {
       userObj.location = "Location not set";
     }
@@ -439,9 +454,9 @@ const getAllUsers = async (req, res) => {
     const blockedUserIds = blockedUsers.map((b) => b.targetUserId);
 
     // ✅ Fetch reported users
-    const reportedUsers = await Report.find({ reporterId: currentUserId }).select(
-      "reportedUserId"
-    );
+    const reportedUsers = await Report.find({
+      reporterId: currentUserId,
+    }).select("reportedUserId");
     const reportedUserIds = reportedUsers.map((r) => r.reportedUserId);
 
     // ✅ Fetch current user
@@ -641,12 +656,18 @@ const getUserDetailsByUserId = async (req, res) => {
       requestedUser.location = "Location not set";
     }
 
-    return handleResponse(res, 200, "User details fetched successfully.", requestedUser);
+    return handleResponse(
+      res,
+      200,
+      "User details fetched successfully.",
+      requestedUser
+    );
   } catch (error) {
     console.error("Error in getUserDetailsByUserId:", error);
     return handleResponse(res, 500, "Something went wrong.");
   }
 };
+
 /*
 //before 05 Nov 2025
 const filterUsers = async (req, res) => {
@@ -904,17 +925,33 @@ const filterUsers = async (req, res) => {
     }
 
     if (sexual_orientation) {
-      matchStage.sexual_orientation = new RegExp(`^${sexual_orientation}$`, "i");
+      matchStage.sexual_orientation = new RegExp(
+        `^${sexual_orientation}$`,
+        "i"
+      );
     }
 
-    const exactFilters = ["smoking", "drinking", "diet", "hasKids", "wantsKids", "relationshipGoals"];
+    const exactFilters = [
+      "smoking",
+      "drinking",
+      "diet",
+      "hasKids",
+      "wantsKids",
+      "relationshipGoals",
+    ];
     exactFilters.forEach((field) => {
       if (query[field]) {
         matchStage[field] = normalizeValue(query[field]);
       }
     });
 
-    const regexFilters = ["body_type", "religion", "caste", "profession", "education"];
+    const regexFilters = [
+      "body_type",
+      "religion",
+      "caste",
+      "profession",
+      "education",
+    ];
     regexFilters.forEach((field) => {
       if (query[field]) {
         matchStage[field] = new RegExp(`^${query[field]}$`, "i");
@@ -934,10 +971,18 @@ const filterUsers = async (req, res) => {
     if (minAge || maxAge) {
       const today = new Date();
       const minDOB = maxAge
-        ? new Date(today.getFullYear() - Number(maxAge), today.getMonth(), today.getDate())
+        ? new Date(
+            today.getFullYear() - Number(maxAge),
+            today.getMonth(),
+            today.getDate()
+          )
         : null;
       const maxDOB = minAge
-        ? new Date(today.getFullYear() - Number(minAge), today.getMonth(), today.getDate())
+        ? new Date(
+            today.getFullYear() - Number(minAge),
+            today.getMonth(),
+            today.getDate()
+          )
         : null;
 
       matchStage.date_of_birth = {};
@@ -946,7 +991,9 @@ const filterUsers = async (req, res) => {
     }
 
     if (interests) {
-      const interestArray = interests.split(",").map((i) => i.trim().toLowerCase());
+      const interestArray = interests
+        .split(",")
+        .map((i) => i.trim().toLowerCase());
       matchStage.interest = { $in: interestArray };
     }
 
@@ -965,11 +1012,18 @@ const filterUsers = async (req, res) => {
     const skip = (Number(page) - 1) * Number(perPage);
     const pipeline = [];
 
-    if (lat !== undefined && lng !== undefined && preferred_match_distance !== undefined) {
+    if (
+      lat !== undefined &&
+      lng !== undefined &&
+      preferred_match_distance !== undefined
+    ) {
       const distanceInMeters = Number(preferred_match_distance) * 1609.34;
       pipeline.push({
         $geoNear: {
-          near: { type: "Point", coordinates: [parseFloat(lng), parseFloat(lat)] },
+          near: {
+            type: "Point",
+            coordinates: [parseFloat(lng), parseFloat(lat)],
+          },
           distanceField: "distance",
           maxDistance: distanceInMeters,
           spherical: true,
@@ -997,7 +1051,8 @@ const filterUsers = async (req, res) => {
     const users = await User.aggregate(pipeline);
 
     for (const user of users) {
-      if (user.date_of_birth) user.date_of_birth = formatDate(user.date_of_birth);
+      if (user.date_of_birth)
+        user.date_of_birth = formatDate(user.date_of_birth);
 
       if (user.location?.coordinates?.length === 2) {
         const [lng, lat] = user.location.coordinates;
@@ -1008,11 +1063,18 @@ const filterUsers = async (req, res) => {
     }
 
     let totalItems;
-    if (lat !== undefined && lng !== undefined && preferred_match_distance !== undefined) {
+    if (
+      lat !== undefined &&
+      lng !== undefined &&
+      preferred_match_distance !== undefined
+    ) {
       const countPipeline = [
         {
           $geoNear: {
-            near: { type: "Point", coordinates: [parseFloat(lng), parseFloat(lat)] },
+            near: {
+              type: "Point",
+              coordinates: [parseFloat(lng), parseFloat(lat)],
+            },
             distanceField: "distance",
             maxDistance: Number(preferred_match_distance) * 1609.34,
             spherical: true,
@@ -1047,18 +1109,44 @@ const getUsers = async (req, res) => {
     const currentUserId = req.user.id;
 
     const {
-      page = 1, perPage = 6, q,
-      gender, sexual_orientation, show_me, minAge, maxAge, preferred_match_distance, height, hasPets, interests, lat, lng,
-      smoking, drinking, diet, hasKids, wantsKids, relationshipGoals, body_type, religion, caste, profession, education,
+      page = 1,
+      perPage = 7,
+      q,
+      gender,
+      sexual_orientation,
+      show_me,
+      minAge,
+      maxAge,
+      preferred_match_distance,
+      height,
+      hasPets,
+      interests,
+      lat,
+      lng,
+      smoking,
+      drinking,
+      diet,
+      hasKids,
+      wantsKids,
+      relationshipGoals,
+      body_type,
+      religion,
+      caste,
+      profession,
+      education,
     } = req.query;
 
     const skip = (Number(page) - 1) * Number(perPage);
 
     // ✅ Fetch blocked and reported users
-    const blockedUsers = await Block.find({ userId: currentUserId }).select("targetUserId");
+    const blockedUsers = await Block.find({ userId: currentUserId }).select(
+      "targetUserId"
+    );
     const blockedUserIds = blockedUsers.map((b) => b.targetUserId);
 
-    const reportedUsers = await Report.find({ reporterId: currentUserId }).select("reportedUserId");
+    const reportedUsers = await Report.find({
+      reporterId: currentUserId,
+    }).select("reportedUserId");
     const reportedUserIds = reportedUsers.map((r) => r.reportedUserId);
 
     // ✅ Fetch current user
@@ -1069,7 +1157,10 @@ const getUsers = async (req, res) => {
 
     // ✅ Base match conditions
     const matchStage = {
-      _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] },
+      _id: {
+        $ne: currentUser._id,
+        $nin: [...blockedUserIds, ...reportedUserIds],
+      },
       isVerified: true,
     };
 
@@ -1080,8 +1171,10 @@ const getUsers = async (req, res) => {
       if (show_me.toLowerCase() === "men") matchStage.gender = "male";
       else if (show_me.toLowerCase() === "women") matchStage.gender = "female";
     } else if (currentUser.show_me) {
-      if (currentUser.show_me.toLowerCase() === "men") matchStage.gender = "male";
-      else if (currentUser.show_me.toLowerCase() === "women") matchStage.gender = "female";
+      if (currentUser.show_me.toLowerCase() === "men")
+        matchStage.gender = "male";
+      else if (currentUser.show_me.toLowerCase() === "women")
+        matchStage.gender = "female";
     }
 
     // ✅ Search query
@@ -1106,8 +1199,19 @@ const getUsers = async (req, res) => {
 
     // ✅ Multi-value compatible filters
     const multiValueFilters = {
-      sexual_orientation, smoking, drinking, diet, hasKids, wantsKids, relationshipGoals, body_type, religion,
-      caste, profession, education };
+      sexual_orientation,
+      smoking,
+      drinking,
+      diet,
+      hasKids,
+      wantsKids,
+      relationshipGoals,
+      body_type,
+      religion,
+      caste,
+      profession,
+      education,
+    };
 
     for (const [key, val] of Object.entries(multiValueFilters)) {
       const arr = multiValue(val);
@@ -1126,10 +1230,18 @@ const getUsers = async (req, res) => {
     if (minAge || maxAge) {
       const today = new Date();
       const minDOB = maxAge
-        ? new Date(today.getFullYear() - Number(maxAge), today.getMonth(), today.getDate())
+        ? new Date(
+            today.getFullYear() - Number(maxAge),
+            today.getMonth(),
+            today.getDate()
+          )
         : null;
       const maxDOB = minAge
-        ? new Date(today.getFullYear() - Number(minAge), today.getMonth(), today.getDate())
+        ? new Date(
+            today.getFullYear() - Number(minAge),
+            today.getMonth(),
+            today.getDate()
+          )
         : null;
 
       matchStage.date_of_birth = {};
@@ -1139,13 +1251,19 @@ const getUsers = async (req, res) => {
 
     // ✅ Interests
     if (interests) {
-      const interestArray = interests.split(",").map((i) => i.trim().toLowerCase());
+      const interestArray = interests
+        .split(",")
+        .map((i) => i.trim().toLowerCase());
       matchStage.interest = { $in: interestArray };
     }
 
     // ✅ Location setup
-    const userLat = lat ? parseFloat(lat) : currentUser.location?.coordinates[1];
-    const userLng = lng ? parseFloat(lng) : currentUser.location?.coordinates[0];
+    const userLat = lat
+      ? parseFloat(lat)
+      : currentUser.location?.coordinates[1];
+    const userLng = lng
+      ? parseFloat(lng)
+      : currentUser.location?.coordinates[0];
     const maxDistance = preferred_match_distance
       ? Number(preferred_match_distance) * 1000
       : (currentUser.preferred_match_distance || 50) * 1000;
@@ -1176,26 +1294,33 @@ const getUsers = async (req, res) => {
           isNewUser: 0,
           isVerified: 0,
           email: 0,
+          preferred_match_distance: 0,
+          profileCompleteness: 0,
+          age_range: 0,
           randomSort: 0,
+          createdAt: 0,
+          updatedAt: 0,
         },
       },
     ];
 
     let users = await User.aggregate(pipeline);
 
-    // ✅ Format results
     for (let user of users) {
-      if (user.date_of_birth) user.date_of_birth = formatDate(user.date_of_birth);
+      if (user.date_of_birth)
+        user.date_of_birth = formatDate(user.date_of_birth);
       if (user.distance) user.distance = (user.distance / 1000).toFixed(2); // km
       if (user.location?.coordinates?.length === 2) {
         const [lon, lat] = user.location.coordinates;
-        user.location = await getPlaceName(lat, lon);
+        // user.location = await getPlaceName(lat, lon);
+        user.location =
+          user.location?.city || user.location?.place_name || "Unknown";
       } else {
         user.location = "Unknown location";
       }
 
       if (currentUser.gender === "male" && user.gender === "female") {
-        user.name = user.name.charAt(0) + ".";
+        user.name = user.name.charAt(0) + "";
       }
     }
 
@@ -1239,5 +1364,5 @@ export const user = {
   getMatches,
   getAllUsers,
   filterUsers,
-  getUsers
+  getUsers,
 };
