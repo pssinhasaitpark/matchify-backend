@@ -2,7 +2,7 @@
 import mongoose from "mongoose";
 import { User } from "../../models/user.js";
 import { Like } from "../../models/userAction/like.js";
-import { handleResponse } from "../../utils/helper.js";
+import { calculateAge, handleResponse } from "../../utils/helper.js";
 import { formatDate } from "../../utils/dateFormatter.js"; 
 import { getPlaceName } from "../../services/locationService.js";
 
@@ -240,8 +240,156 @@ const getUsersWhoLikedMe = async (req, res) => {
   }
 };
 
+const getMutualLikes = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const {
+      page = 1,
+      perPage = 6,
+      minAge,
+      maxAge,
+    } = req.query;
+
+    const skip = (Number(page) - 1) * Number(perPage);
+
+    const currentUser = await User.findById(userId);
+    if (!currentUser || !currentUser.location?.coordinates) {
+      return handleResponse(res, 400, "User location not set.");
+    }
+
+    // 1️⃣ Find users liked by current user
+    const usersLikedByMe = await Like.find({
+      userId: new mongoose.Types.ObjectId(String(userId)),
+    }).select("targetUserId");
+
+    // 2️⃣ Find users who liked current user
+    const usersWhoLikedMe = await Like.find({
+      targetUserId: new mongoose.Types.ObjectId(String(userId)),
+    }).select("userId");
+
+    // 3️⃣ Get user IDs
+    const myLikedUserIds = usersLikedByMe.map((l) => l.targetUserId.toString());
+    const usersWhoLikedMeIds = usersWhoLikedMe.map((l) => l.userId.toString());
+
+    // 4️⃣ Find intersection (mutual likes)
+    const mutualLikesIds = myLikedUserIds.filter((id) => usersWhoLikedMeIds.includes(id));
+
+    if (mutualLikesIds.length === 0) {
+      return handleResponse(res, 200, "No mutual likes found.", {
+        results: [],
+        totalItems: 0,
+        currentPage: Number(page),
+        totalPages: 0,
+      });
+    }
+
+    // 5️⃣ Build match stage
+    const matchStage = {
+      _id: { $in: mutualLikesIds.map((id) => new mongoose.Types.ObjectId(id)) },
+      isVerified: true,
+    };
+
+    // ✅ Age filter (using DOB)
+    if (minAge || maxAge) {
+      const today = new Date();
+      const minDOB = maxAge
+        ? new Date(today.getFullYear() - Number(maxAge), today.getMonth(), today.getDate())
+        : null;
+      const maxDOB = minAge
+        ? new Date(today.getFullYear() - Number(minAge), today.getMonth(), today.getDate())
+        : null;
+
+      matchStage.date_of_birth = {};
+      if (minDOB) matchStage.date_of_birth.$gte = minDOB;
+      if (maxDOB) matchStage.date_of_birth.$lte = maxDOB;
+    }
+
+    // ✅ Geo coordinates
+    const userLat = currentUser.location.coordinates[1];
+    const userLng = currentUser.location.coordinates[0];
+
+    // 6️⃣ Aggregation pipeline
+    const pipeline = [
+      {
+        $geoNear: {
+          near: { type: "Point", coordinates: [userLng, userLat] },
+          distanceField: "distance",
+          spherical: true,
+          query: matchStage,
+        },
+      },
+      { $skip: skip },
+      { $limit: Number(perPage) },
+      {
+        $project: {
+          name: 1,
+          date_of_birth: 1,
+          images: 1,
+          location: 1,
+          distance: 1,
+        },
+      },
+    ];
+
+    let mutualLikes = await User.aggregate(pipeline);
+
+    // 7️⃣ Format data
+    for (const user of mutualLikes) {
+      user.age = calculateAge(user.date_of_birth);
+      delete user.date_of_birth;
+
+      if (user.distance) {
+        user.distance = (user.distance / 1000).toFixed(2); // km
+      }
+
+      if (user.location?.coordinates?.length === 2) {
+        const [lng, lat] = user.location.coordinates;
+        user.location = await getPlaceName(lat, lng);
+      } else {
+        user.location = "Unknown location";
+      }
+
+      // Only first image
+      if (user.images && user.images.length > 0) {
+        user.images = user.images[0];
+      } else {
+        user.images = null;
+      }
+    }
+
+    // 8️⃣ Count total for pagination
+    const countPipeline = [
+      {
+        $geoNear: {
+          near: { type: "Point", coordinates: [userLng, userLat] },
+          distanceField: "distance",
+          spherical: true,
+          query: matchStage,
+        },
+      },
+      { $count: "total" },
+    ];
+    const countResult = await User.aggregate(countPipeline);
+    const totalItems = countResult[0]?.total || 0;
+    const totalPages = Math.ceil(totalItems / perPage);
+
+    // ✅ Final response
+    return handleResponse(res, 200, "Mutual likes fetched successfully.", {
+      results: mutualLikes,
+      totalItems,
+      currentPage: Number(page),
+      totalPages,
+      totalItemsOnCurrentPage: mutualLikes.length,
+    });
+  } catch (error) {
+    console.error("Error in getMutualLikes:", error);
+    return handleResponse(res, 500, "Something went wrong.");
+  }
+};
+
 export const likes = {
   likeUser,
   getAllLikedUsers,
-  getUsersWhoLikedMe
+  getUsersWhoLikedMe,
+  getMutualLikes
 };

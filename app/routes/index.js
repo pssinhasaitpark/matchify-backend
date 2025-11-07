@@ -6,6 +6,7 @@ import likeRoutes from "./userAction/like.js";
 import dislikeRoutes from "./userAction/dislike.js";
 import blockRoutes from "./userAction/block.js";
 import reportRoutes from "./userAction/report.js";
+import discoverPagesRoutes from "./discoverPages.js";
 
 const setupRoutes = (app) => {
   app.use(passport.initialize());
@@ -15,6 +16,7 @@ const setupRoutes = (app) => {
   app.use("/api/v1/user-action/dislike", dislikeRoutes);
   app.use("/api/v1/user-action/block", blockRoutes);
   app.use("/api/v1/user-action/report", reportRoutes);
+  app.use("/api/v1/discover", discoverPagesRoutes)
 };
 
 export default setupRoutes;

@@ -43,7 +43,8 @@ const userSchema = new mongoose.Schema(
     hasPets: { type: Boolean, default: false },
     relationshipGoals: {
       type: String,
-      enum: ["Casual Dating", "Serious Relationship", "Marriage", "Open to explore"],
+      enum: ["Casual Dating", "Serious Relationship", "Marriage", "Open to explore", "Long Term",
+        "Short Term", "Friendship", "Activity Partner", "Companionship", "Not Sure Yet", "Prefer Not to Say" ],
       default: "Open to explore",
     },
 
