@@ -6,7 +6,11 @@ const userSchema = new mongoose.Schema(
     email: { type: String, required: true, unique: true },
     name: { type: String, required: false },
     date_of_birth: { type: Date, required: false },
-    gender: { type: String, enum: ["male", "female", "other"], required: false },
+    gender: {
+      type: String,
+      enum: ["male", "female", "other"],
+      required: false,
+    },
 
     sexual_orientation: { type: String, default: null },
 
@@ -20,10 +24,18 @@ const userSchema = new mongoose.Schema(
         type: [Number],
         default: [0, 0],
       },
+      place_name: {
+        type: String,
+        default: "Location not set",
+      },
     },
 
     preferred_match_distance: { type: Number, default: 50 },
-    show_me: { type: String, enum: ["men", "women", "everyone"], default: "everyone" },
+    show_me: {
+      type: String,
+      enum: ["men", "women", "everyone"],
+      default: "everyone",
+    },
     age_range: { type: [Number], default: [18, 30] },
 
     height: { type: Number, default: null },
@@ -35,16 +47,43 @@ const userSchema = new mongoose.Schema(
     interest: { type: [String], default: [] },
     smoking: { type: String, enum: ["Yes", "No", "Sometimes"], default: "No" },
     drinking: { type: String, enum: ["Yes", "No", "Socially"], default: "No" },
-    diet: { type: String, enum: ["None", "Vegan", "Vegetarian", "Non Vegetarian", "Halal", "Kosher", "Other"], default: "None" },
+    diet: {
+      type: String,
+      enum: [
+        "None",
+        "Vegan",
+        "Vegetarian",
+        "Non Vegetarian",
+        "Halal",
+        "Kosher",
+        "Other",
+      ],
+      default: "None",
+    },
     religion: { type: String, default: null },
     caste: { type: String, default: null },
-    hasKids: { type: String, enum: ["Yes", "No", "Prefer not to say"], default: "Prefer not to say" },
+    hasKids: {
+      type: String,
+      enum: ["Yes", "No", "Prefer not to say"],
+      default: "Prefer not to say",
+    },
     wantsKids: { type: String, enum: ["Yes", "No", "Maybe"], default: "Maybe" },
     hasPets: { type: Boolean, default: false },
     relationshipGoals: {
       type: String,
-      enum: ["Casual Dating", "Serious Relationship", "Marriage", "Open to explore", "Long Term",
-        "Short Term", "Friendship", "Activity Partner", "Companionship", "Not Sure Yet", "Prefer Not to Say" ],
+      enum: [
+        "Casual Dating",
+        "Serious Relationship",
+        "Marriage",
+        "Open to explore",
+        "Long Term",
+        "Short Term",
+        "Friendship",
+        "Activity Partner",
+        "Companionship",
+        "Not Sure Yet",
+        "Prefer Not to Say",
+      ],
       default: "Open to explore",
     },
 

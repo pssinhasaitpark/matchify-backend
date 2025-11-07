@@ -4,6 +4,7 @@ import { User } from "../../models/user.js";
 import { Report } from "../../models/userAction/report.js";
 import { reportUserValidator } from "../../validators/userAction/report.js";
 import { handleResponse } from "../../utils/helper.js";
+import { Like } from "../../models/userAction/like.js";
 
 const reportUser = async (req, res) => {
   try {
@@ -23,16 +24,24 @@ const reportUser = async (req, res) => {
       return handleResponse(res, 400, "Invalid reported user ID format.");
     }
 
-    // Check if reported user exists
-    const reportedUser = await User.findById(reportedUserId);
-    if (!reportedUser) {
-      return handleResponse(res, 404, "Reported user not found.");
-    }
+    // // Check if reported user exists
+    // const reportedUser = await User.findById(reportedUserId);
+    // if (!reportedUser) {
+    //   return handleResponse(res, 404, "Reported user not found.");
+    // }
 
     // Prevent self-reporting
     if (reporterId === reportedUserId) {
       return handleResponse(res, 400, "You cannot report yourself.");
     }
+
+    // Check if user exists
+    const reportedUser = await User.findById(reportedUserId);
+    if (!reportedUser) {
+      return handleResponse(res, 404, "Reported user not found.");
+    }
+
+
 
     // Check if report already exists
     const existingReport = await Report.findOne({
@@ -55,6 +64,14 @@ const reportUser = async (req, res) => {
       reportedUserId,
       reason,
       details: details || "",
+    });
+
+     //Remove any existing "likes" in both directions
+    await Like.deleteMany({
+      $or: [
+        { userId: reporterId, targetUserId: reportedUserId },
+        { userId: reportedUserId, targetUserId: reporterId },
+      ],
     });
 
     return handleResponse(res, 201, "User reported successfully.");

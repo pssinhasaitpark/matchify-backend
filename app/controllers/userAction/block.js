@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import { User } from "../../models/user.js";
 import { Block } from "../../models/userAction/block.js";
 import { handleResponse } from "../../utils/helper.js";
+import { Like } from "../../models/userAction/like.js";
 
 const blockUser = async (req, res) => {
   try {
@@ -29,6 +30,14 @@ const blockUser = async (req, res) => {
       { $setOnInsert: { createdAt: new Date() } },
       { upsert: true, new: true }
     );
+
+     // 🚫 Remove any existing "likes" in both directions
+    await Like.deleteMany({
+      $or: [
+        { userId, targetUserId },
+        { userId: targetUserId, targetUserId: userId },
+      ],
+    });
 
     return handleResponse(res, 201, "User blocked successfully.");
   } catch (error) {
