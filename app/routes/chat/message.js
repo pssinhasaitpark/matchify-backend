@@ -5,6 +5,8 @@ import { verifyToken } from "../../middlewares/jwtAuth.js";
 
 const router = express.Router();
 
+router.get("/users", verifyToken, chat.getUserChats); 
+
 router.post("/:receiverId", verifyToken, chat.createChatMessage);
 
 router.get("/:receiverId", verifyToken, chat.getChatHistory);

@@ -158,14 +158,12 @@ const verifyEmailForOTP = async (req, res) => {
 const loginUserWithOTP = async (req, res) => {
   const { email, otp } = req.body;
 
-  // Find the user by email
   let user = await User.findOne({ email });
 
   if (!user) {
     return handleResponse(res, 404, "Email not found.");
   }
 
-  // Check if OTP matches
   if (user.otp !== otp) {
     return handleResponse(res, 400, "Invalid OTP. Please try again.");
   }
@@ -178,23 +176,19 @@ const loginUserWithOTP = async (req, res) => {
 
     const token = generateToken(user._id, user.email);
 
-    return handleResponse(
-      res,
-      200,
-      "Logged in successfully and verified as new user.",
-      { token, isNewUser: user.isNewUser }
+    return handleResponse(res, 200, "Logged in successfully and verified as new user.",
+        { token,  id: user._id, isNewUser: user.isNewUser }
     );
   }
 
-  // If existing user, clear OTP and log them in
   user.otp = "";
   await user.save();
 
-  // Generate JWT token for the existing user
   const token = generateToken(user._id, user.email);
 
   return handleResponse(res, 200, "Logged in successfully via OTP.", {
     token,
+    id: user._id, 
     isNewUser: user.isNewUser,
   });
 };
@@ -210,7 +204,6 @@ const me = async (req, res) => {
 
     const userObj = user.toObject();
 
-    // Format date_of_birth
     if (userObj.date_of_birth) {
       userObj.date_of_birth = formatDate(userObj.date_of_birth);
     }
@@ -222,106 +215,10 @@ const me = async (req, res) => {
       userObj.location = "Location not set";
     }
 
-    return handleResponse(
-      res,
-      200,
-      "User details fetched successfully.",
-      userObj
-    );
+    return handleResponse(res, 200, "User details fetched successfully.", userObj );
   } catch (error) {
     console.error("Error in getUserDetails:", error);
     return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-
-const getMatches = async (req, res) => {
-  try {
-    const currentUserId = req.user._id;
-    const currentUser = await User.findById(currentUserId);
-
-    if (!currentUser) {
-      return res
-        .status(404)
-        .json({ status: false, message: "User not found." });
-    }
-
-    // Extract criteria from current user
-    const {
-      location,
-      preferred_match_distance,
-      show_me,
-      age_range,
-      sexual_orientation,
-      relationshipGoals,
-      interest: userInterests,
-    } = currentUser;
-
-    // Match genders based on "show_me"
-    let gendersToMatch = [];
-    if (show_me === "men") gendersToMatch = ["male"];
-    else if (show_me === "women") gendersToMatch = ["female"];
-    else gendersToMatch = ["male", "female", "other"];
-
-    // Aggregation pipeline for matching
-    const pipeline = [
-      {
-        $geoNear: {
-          near: location,
-          distanceField: "distance",
-          maxDistance: preferred_match_distance * 1000, // convert km to meters
-          spherical: true,
-          query: {
-            _id: { $ne: currentUserId }, // exclude self
-            isVerified: true,
-            gender: { $in: gendersToMatch },
-            sexual_orientation: sexual_orientation, // match orientation (you can tweak)
-            "age_range.0": { $lte: currentUser.age_range[1] },
-            "age_range.1": { $gte: currentUser.age_range[0] },
-          },
-        },
-      },
-      {
-        $addFields: {
-          // Simple scoring example
-          interestMatchCount: {
-            $size: {
-              $setIntersection: ["$interest", userInterests || []],
-            },
-          },
-          relationshipGoalMatch: {
-            $cond: [{ $eq: ["$relationshipGoals", relationshipGoals] }, 1, 0],
-          },
-          profileScore: {
-            $add: [
-              "$profileCompleteness",
-              { $multiply: ["$interestMatchCount", 10] },
-              { $multiply: ["$relationshipGoalMatch", 20] },
-              { $subtract: [100, "$distance"] }, // closer better
-            ],
-          },
-        },
-      },
-      {
-        $sort: { profileScore: -1, lastActiveAt: -1 },
-      },
-      {
-        $limit: 20,
-      },
-      {
-        $project: {
-          password: 0,
-          otp: 0,
-          __v: 0,
-        },
-      },
-    ];
-
-    const matches = await User.aggregate(pipeline);
-
-    return res.status(200).json({ status: true, data: matches });
-  } catch (err) {
-    console.error(err);
-    return res.status(500).json({ status: false, message: "Server error" });
   }
 };
 
@@ -418,37 +315,13 @@ const getUsers = async (req, res) => {
   try {
     const currentUserId = req.user.id;
 
-    const {
-      page = 1,
-      perPage = 7,
-      q,
-      gender,
-      sexual_orientation,
-      show_me,
-      minAge,
-      maxAge,
-      preferred_match_distance,
-      height,
-      hasPets,
-      interests,
-      lat,
-      lng,
-      smoking,
-      drinking,
-      diet,
-      hasKids,
-      wantsKids,
-      relationshipGoals,
-      body_type,
-      religion,
-      caste,
-      profession,
-      education,
-    } = req.query;
+    const { page = 1, perPage = 7, q,
+      gender, sexual_orientation, show_me, minAge, maxAge, preferred_match_distance, height, hasPets, interests, lat, lng,
+      smoking, drinking, diet, hasKids, wantsKids, relationshipGoals, body_type, religion, caste, profession, education,
+     } = req.query;
 
     const skip = (Number(page) - 1) * Number(perPage);
 
-    // ✅ Fetch blocked and reported users
     const blockedUsers = await Block.find({ userId: currentUserId }).select(
       "targetUserId"
     );
@@ -459,13 +332,11 @@ const getUsers = async (req, res) => {
     }).select("reportedUserId");
     const reportedUserIds = reportedUsers.map((r) => r.reportedUserId);
 
-    // ✅ Fetch current user
     const currentUser = await User.findById(currentUserId);
     if (!currentUser || !currentUser.isVerified) {
       return handleResponse(res, 404, "User not found or not verified.");
     }
 
-    // ✅ Base match conditions
     const matchStage = {
       _id: {
         $ne: currentUser._id,
@@ -474,7 +345,6 @@ const getUsers = async (req, res) => {
       isVerified: true,
     };
 
-    // ✅ Gender logic (priority: query param > show_me > currentUser.show_me)
     if (gender) {
       matchStage.gender = gender.toLowerCase();
     } else if (show_me) {
@@ -487,7 +357,6 @@ const getUsers = async (req, res) => {
         matchStage.gender = "female";
     }
 
-    // ✅ Search query
     if (q) {
       const regex = new RegExp(q, "i");
       matchStage.$or = [
@@ -499,7 +368,6 @@ const getUsers = async (req, res) => {
       ];
     }
 
-    // ✅ Multi-value helper (supports "a,b,c" format)
     const multiValue = (val) =>
       typeof val === "string" && val.includes(",")
         ? val.split(",").map((v) => v.trim())
@@ -507,21 +375,9 @@ const getUsers = async (req, res) => {
         ? [val]
         : [];
 
-    // ✅ Multi-value compatible filters
     const multiValueFilters = {
-      sexual_orientation,
-      smoking,
-      drinking,
-      diet,
-      hasKids,
-      wantsKids,
-      relationshipGoals,
-      body_type,
-      religion,
-      caste,
-      profession,
-      education,
-    };
+      sexual_orientation, smoking, drinking, diet, hasKids, wantsKids, relationshipGoals, body_type, religion,
+      caste, profession, education };
 
     for (const [key, val] of Object.entries(multiValueFilters)) {
       const arr = multiValue(val);
@@ -530,59 +386,33 @@ const getUsers = async (req, res) => {
       }
     }
 
-    // ✅ Height
     if (height) matchStage.height = { $lte: Number(height) };
 
-    // ✅ Has Pets
     if (hasPets !== undefined) matchStage.hasPets = hasPets === "true";
 
-    // ✅ Age range filter
     if (minAge || maxAge) {
       const today = new Date();
-      const minDOB = maxAge
-        ? new Date(
-            today.getFullYear() - Number(maxAge),
-            today.getMonth(),
-            today.getDate()
-          )
-        : null;
-      const maxDOB = minAge
-        ? new Date(
-            today.getFullYear() - Number(minAge),
-            today.getMonth(),
-            today.getDate()
-          )
-        : null;
+      const minDOB = maxAge ? new Date(today.getFullYear() - Number(maxAge), today.getMonth(), today.getDate()) : null;
+      const maxDOB = minAge ? new Date(today.getFullYear() - Number(minAge), today.getMonth(), today.getDate()) : null;
 
       matchStage.date_of_birth = {};
       if (minDOB) matchStage.date_of_birth.$gte = minDOB;
       if (maxDOB) matchStage.date_of_birth.$lte = maxDOB;
     }
 
-    // ✅ Interests
     if (interests) {
-      const interestArray = interests
-        .split(",")
-        .map((i) => i.trim().toLowerCase());
+      const interestArray = interests.split(",").map((i) => i.trim().toLowerCase());
       matchStage.interest = { $in: interestArray };
     }
 
-    // ✅ Location setup
-    const userLat = lat
-      ? parseFloat(lat)
-      : currentUser.location?.coordinates[1];
-    const userLng = lng
-      ? parseFloat(lng)
-      : currentUser.location?.coordinates[0];
-    const maxDistance = preferred_match_distance
-      ? Number(preferred_match_distance) * 1000
-      : (currentUser.preferred_match_distance || 50) * 1000;
+    const userLat = lat ? parseFloat(lat) : currentUser.location?.coordinates[1];
+    const userLng = lng ? parseFloat(lng) : currentUser.location?.coordinates[0];
+    const maxDistance = preferred_match_distance ? Number(preferred_match_distance) * 1000 : (currentUser.preferred_match_distance || 50) * 1000;
 
     if (!userLat || !userLng) {
       return handleResponse(res, 400, "User location not set properly.");
     }
 
-    // ✅ Aggregation pipeline
     const pipeline = [
       {
         $geoNear: {
@@ -634,7 +464,6 @@ const getUsers = async (req, res) => {
       }
     }
 
-    // ✅ Count total results
     const countPipeline = [
       {
         $geoNear: {
@@ -669,14 +498,12 @@ const updateProfile = async (req, res) => {
   try {
     const body = { ...req.body };
 
-    // Validate using Joi (sirf provided fields ke liye)
     const { error } = updateProfileValidator.validate(body);
     if (error) {
       const cleanMessage = error.details[0].message.replace(/\"/g, "");
       return handleResponse(res, 400, cleanMessage);
     }
 
-    // Verify token
     const token = req.header("Authorization")?.replace("Bearer ", "");
     if (!token)
       return handleResponse(res, 401, "Authorization token required.");
@@ -691,7 +518,6 @@ const updateProfile = async (req, res) => {
       return handleResponse(res, 400, "Invalid or expired token.");
     }
 
-    // Find user by token
     const user = await User.findById(decodedToken.userId);
     if (!user || !user.isVerified) {
       return handleResponse(res, 404, "User not found or not verified.");
@@ -735,7 +561,6 @@ const updateProfile = async (req, res) => {
     if (req.convertedFiles?.images !== undefined)
       user.images = req.convertedFiles.images || user.images;
 
-    // Recalculate profile completeness
     user.profileCompleteness = calculateProfileCompleteness(user);
 
      if (
@@ -749,16 +574,14 @@ const updateProfile = async (req, res) => {
         !user.location.place_name ||
         user.location.place_name === "Location not set"
       ) {
-        // ✅ placeData is a string like "Rau Tahsil"
         const placeData = await getPlaceName(lat, lng);
-        console.log("Fetched Citiesssssss:", placeData);
+        console.log("Fetched Cities :", placeData);
 
         user.location.place_name = placeData || "Unknown";
       }
     }
     await user.save();
 
-    // Generate and return new token
     const updatedToken = generateToken(user._id, user.email);
     return handleResponse(res, 200, "Profile updated successfully.", {
       token: updatedToken,
@@ -778,7 +601,6 @@ export const user = {
   loginUserWithOTP,
   me,
   getUserDetailsByUserId,
-  getMatches,
   getUsers,
   updateProfile,
 };

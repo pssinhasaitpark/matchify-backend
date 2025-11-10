@@ -92,7 +92,48 @@ const getChatHistory = async (req, res) => {
   }
 };
 
+const getUserChats = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Find all conversations the user is part of
+    const conversations = await Message.find({
+      participants: userId,
+    })
+      .populate("participants", "name") 
+      .lean();
+
+    if (!conversations || conversations.length === 0)
+      return handleResponse(res, 200, "No conversations found", { results: [] });
+
+    const results = conversations.map((conv) => {
+      const otherUser = conv.participants.find(
+        (p) => p._id.toString() !== userId
+      );
+
+      const lastMessage =
+        conv.messages && conv.messages.length > 0 ? conv.messages[conv.messages.length - 1] : null;
+
+      const unreadCount = conv.messages.filter((m) => !m.read && m.sender.toString() !== userId).length;
+
+      return {
+        userId: otherUser?._id || null,
+        name: otherUser?.name || "Unknown",
+        lastMessage: lastMessage ? lastMessage.text : null,
+        lastMessageTime: lastMessage ? lastMessage.createdAt : null,
+        unreadCount,
+      };
+    });
+
+    return handleResponse(res, 200, "Chat list fetched successfully", { results });
+  } catch (err) {
+    console.error("Error fetching user chat list:", err);
+    return handleResponse(res, 500, "Internal Server Error");
+  }
+};
+
 export const chat = {
   getChatHistory,
   createChatMessage,
+  getUserChats
 };
