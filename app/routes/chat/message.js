@@ -9,6 +9,6 @@ router.get("/users", verifyToken, chat.getUserChats);
 
 router.post("/:receiverId", verifyToken, chat.createChatMessage);
 
-router.get("/:receiverId", verifyToken, chat.getChatHistory);
+router.get("/:receiverId", verifyToken, chat.getChatHChatistory);
 
 export default router;
