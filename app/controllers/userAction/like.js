@@ -2,8 +2,6 @@
 import mongoose from "mongoose";
 import { User } from "../../models/user.js";
 import { Like } from "../../models/userAction/like.js";
-import { Block } from "../../models/userAction/block.js";
-import { Report } from "../../models/userAction/report.js";
 import { calculateAge, handleResponse } from "../../utils/helper.js";
 import { getPlaceName } from "../../services/locationService.js";
 
