@@ -6,7 +6,7 @@ import { imageConversionMiddlewareMultiple } from '../middlewares/fileUploader.j
 
 const router = express.Router();
 
-router.get("/get", verifyToken, user.getAllUsers);
+router.get("/get", verifyToken, user.getUsers);
 
 router.post('/verify-email', user.verifyEmailForOTP);
 
@@ -16,10 +16,8 @@ router.post('/login-with-otp', user.loginUserWithOTP);
 
 router.get('/me', verifyToken, user.me);
 
-// router.get("/all", verifyToken, user.getAllUsers);
-
-// router.get("/filter", verifyToken, user.filterUsers);
-
 router.get('/:userId', verifyToken, user.getUserDetailsByUserId);
+
+router.patch("/update",verifyToken, imageConversionMiddlewareMultiple, user.updateProfile);
 
 export default router;

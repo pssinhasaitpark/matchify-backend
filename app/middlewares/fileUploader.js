@@ -68,9 +68,9 @@ export const imageConversionMiddlewareMultiple = (req, res, next) => {
         // } else {
         //   return res.status(400).send({ message: "All 6 images are required." });
         // }
-        if (imageUrls.length !== 1) {
-          return res.status(400).json({ message: "At least one imaeg is required." });
-        }
+        // if (imageUrls.length !== 1) {
+        //   return res.status(400).json({ message: "At least one imaeg is required." });
+        // }
 
         convertedFiles.images = imageUrls;
       }

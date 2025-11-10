@@ -2,14 +2,14 @@
 import { User } from "../models/user.js";
 import { Block } from "../models/userAction/block.js";
 import { Report } from "../models/userAction/report.js";
-import { userRegistrationValidator } from "../validators/user.js";
+import { userRegistrationValidator, updateProfileValidator } from "../validators/user.js";
 import { sendOTPEmail } from "../utils/helper.js";
 import { handleResponse } from "../utils/helper.js";
 import { formatDate } from "../utils/dateFormatter.js";
 import { generateToken } from "../middlewares/jwtAuth.js";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
-import { normalizeInterest, normalizeAgeRange, assignUserFields } from "../utils/user.js";
+import { normalizeInterest, normalizeAgeRange, assignUserFields, calculateProfileCompleteness, parseDateDMY, parseLocation } from "../utils/user.js";
 import { getPlaceName } from "../services/locationService.js";
 
 const completeRegistrationAfterEmailVerification = async (req, res) => {
@@ -80,6 +80,11 @@ const completeRegistrationAfterEmailVerification = async (req, res) => {
 
         user.location.place_name = placeData || "Unknown";
       }
+    }
+
+    // app/controllers/user.js
+    if (!req.convertedFiles?.images || req.convertedFiles.images.length === 0) {
+      return handleResponse(res, 400, "At least one image is required for profile completion.");
     }
 
     await user.save();
@@ -320,265 +325,6 @@ const getMatches = async (req, res) => {
   }
 };
 
-/*
-directly getting lat, long points, instead of place name
-const getAllUsers = async (req, res) => {
-  try {
-    const currentUserId = req.user.id;
-    const { page = 1, perPage = 10 } = req.query;
-    const skip = (page - 1) * perPage;
-
-    // Fetch blocked and reported users
-    const userInteraction = await UserInteraction.findOne({ userId: currentUserId });
-    const blockedUserIds = userInteraction?.blockedUsers.map((user) => user.targetUserId) || [];
-    const reportedUserIds = userInteraction?.reportedUsers.map((report) => report.targetUserId) || [];
-
-    const currentUser = await User.findById(currentUserId);
-    if (!currentUser || !currentUser.isVerified) {
-      return handleResponse(res, 404, "User not found or not verified.");
-    }
-
-    // Get preferences from current user
-    const { show_me, preferred_match_distance, location } = currentUser;
-
-    // Gender filter logic
-    let genderFilter = {};
-    if (show_me === 'men') genderFilter.gender = 'male';
-    else if (show_me === 'women') genderFilter.gender = 'female';
-
-    // Ensure location and distance are valid
-    if (!location || !location.coordinates || location.coordinates.length !== 2) {
-      return handleResponse(res, 400, "User location is not set properly.");
-    }
-
-    const distanceInMeters = (preferred_match_distance || 50) * 1000; // ✅ convert preferred distance from km → meters
-
-    const pipeline = [
-      {
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: location.coordinates,
-          },
-          distanceField: "distance", // MongoDB returns in meters
-          maxDistance: distanceInMeters,
-          spherical: true,
-          query: {
-            _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] },
-            isVerified: true,
-            ...genderFilter,
-          },
-        },
-      },
-      { $addFields: { randomSort: { $rand: {} } } },
-      { $sort: { randomSort: 1 } },
-      { $skip: skip },
-      { $limit: Number(perPage) },
-      {
-        $project: {
-          otp: 0,
-          __v: 0,
-          isNewUser: 0,
-          isVerified: 0,
-          email: 0,
-          randomSort: 0,
-        },
-      },
-    ];
-
-    let users = await User.aggregate(pipeline);
-
-    // ✅ Format date_of_birth & distance in km
-    users = users.map((user) => {
-      if (user.date_of_birth) {
-        user.date_of_birth = formatDate(user.date_of_birth);
-      }
-
-      if (user.distance) {
-        user.distance = (user.distance / 1000).toFixed(2); // meters → km
-      }
-
-      return user;
-    });
-
-    // Count total results
-    const countPipeline = [
-      {
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: location.coordinates,
-          },
-          distanceField: "distance",
-          maxDistance: distanceInMeters,
-          spherical: true,
-          query: {
-            _id: { $ne: currentUser._id, $nin: [...blockedUserIds, ...reportedUserIds] },
-            isVerified: true,
-            ...genderFilter,
-          },
-        },
-      },
-      { $count: "total" },
-    ];
-
-    const countResult = await User.aggregate(countPipeline);
-    const totalItems = countResult[0]?.total || 0;
-    const totalPages = Math.ceil(totalItems / perPage);
-
-    return handleResponse(res, 200, "Filtered users fetched successfully.", {
-      results: users,
-      totalItems,
-      currentPage: Number(page),
-      totalPages,
-      totalItemsOnCurrentPage: users.length,
-    });
-  } catch (error) {
-    console.error("Error in getAllUsers:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-*/
-
-//get Location name using lat, long
-const getAllUsers = async (req, res) => {
-  try {
-    const currentUserId = req.user.id;
-    const { page = 1, perPage = 6 } = req.query;
-    const skip = (page - 1) * perPage;
-
-    // ✅ Fetch blocked users
-    const blockedUsers = await Block.find({ userId: currentUserId }).select(
-      "targetUserId"
-    );
-    const blockedUserIds = blockedUsers.map((b) => b.targetUserId);
-
-    // ✅ Fetch reported users
-    const reportedUsers = await Report.find({
-      reporterId: currentUserId,
-    }).select("reportedUserId");
-    const reportedUserIds = reportedUsers.map((r) => r.reportedUserId);
-
-    // ✅ Fetch current user
-    const currentUser = await User.findById(currentUserId);
-    if (!currentUser || !currentUser.isVerified) {
-      return handleResponse(res, 404, "User not found or not verified.");
-    }
-
-    const { show_me, preferred_match_distance, location } = currentUser;
-
-    // ✅ Gender filter logic
-    let genderFilter = {};
-    if (show_me === "men") genderFilter.gender = "male";
-    else if (show_me === "women") genderFilter.gender = "female";
-
-    // ✅ Validate location
-    if (
-      !location ||
-      !location.coordinates ||
-      location.coordinates.length !== 2
-    ) {
-      return handleResponse(res, 400, "User location is not set properly.");
-    }
-
-    const distanceInMeters = (preferred_match_distance || 50) * 1000;
-
-    // ✅ Aggregation pipeline for filtering nearby users
-    const pipeline = [
-      {
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: location.coordinates,
-          },
-          distanceField: "distance",
-          maxDistance: distanceInMeters,
-          spherical: true,
-          query: {
-            _id: {
-              $ne: currentUser._id,
-              $nin: [...blockedUserIds, ...reportedUserIds],
-            },
-            isVerified: true,
-            ...genderFilter,
-          },
-        },
-      },
-      { $addFields: { randomSort: { $rand: {} } } },
-      { $sort: { randomSort: 1 } },
-      { $skip: skip },
-      { $limit: Number(perPage) },
-      {
-        $project: {
-          otp: 0,
-          __v: 0,
-          isNewUser: 0,
-          isVerified: 0,
-          email: 0,
-          randomSort: 0,
-        },
-      },
-    ];
-
-    let users = await User.aggregate(pipeline);
-
-    // ✅ Convert DOB, location, and distance to formatted values
-    for (let user of users) {
-      if (user.date_of_birth) {
-        user.date_of_birth = formatDate(user.date_of_birth);
-      }
-
-      if (user.distance) {
-        user.distance = (user.distance / 1000).toFixed(2); // Convert to km
-      }
-
-      if (user.location && user.location.coordinates) {
-        const [lon, lat] = user.location.coordinates;
-        user.location = await getPlaceName(lat, lon);
-      } else {
-        user.location = "Unknown location";
-      }
-    }
-
-    // ✅ Count total results (for pagination)
-    const countPipeline = [
-      {
-        $geoNear: {
-          near: { type: "Point", coordinates: location.coordinates },
-          distanceField: "distance",
-          maxDistance: distanceInMeters,
-          spherical: true,
-          query: {
-            _id: {
-              $ne: currentUser._id,
-              $nin: [...blockedUserIds, ...reportedUserIds],
-            },
-            isVerified: true,
-            ...genderFilter,
-          },
-        },
-      },
-      { $count: "total" },
-    ];
-
-    const countResult = await User.aggregate(countPipeline);
-    const totalItems = countResult[0]?.total || 0;
-    const totalPages = Math.ceil(totalItems / perPage);
-
-    // ✅ Final response
-    return handleResponse(res, 200, "Filtered users fetched successfully.", {
-      results: users,
-      totalItems,
-      currentPage: Number(page),
-      totalPages,
-      totalItemsOnCurrentPage: users.length,
-    });
-  } catch (error) {
-    console.error("Error in getAllUsers:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-
 const getUserDetailsByUserId = async (req, res) => {
   try {
     const { userId } = req.params;
@@ -664,442 +410,6 @@ const getUserDetailsByUserId = async (req, res) => {
     );
   } catch (error) {
     console.error("Error in getUserDetailsByUserId:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-
-/*
-//before 05 Nov 2025
-const filterUsers = async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    // Fetch the current user's blocked users
-    const userInteraction = await UserInteraction.findOne({ userId });
-    const blockedUserIds = userInteraction?.blockedUsers.map((user) => user.targetUserId) || [];
-     const reportedUserIds = userInteraction?.reportedUsers.map((report) => report.targetUserId) || [];
-
-    // Defaults + query params
-    const query = { q: "", page: 1, perPage: 10, ...req.query };
-    const {
-      q,
-      gender,
-      sexual_orientation,
-      show_me,
-      minAge,
-      maxAge,
-      preferred_match_distance,
-      height,
-      hasPets,
-      interests,
-      lat,
-      lng,
-      page,
-      perPage,
-    } = query;
-
-    const normalizeValue = (val) => {
-      if (typeof val === "string") {
-        return val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
-      }
-      return val;
-    };
-
-    const matchStage = {
-      _id: { $ne: new mongoose.Types.ObjectId(String(userId)), $nin: [...blockedUserIds, ...reportedUserIds] }, // Exclude self and blocked users
-      isVerified: true,
-    };
-
-    if (q) {
-      const regex = new RegExp(q, "i");
-      matchStage.$or = [
-        { name: regex },
-        { bio: regex },
-        { profession: regex },
-        { education: regex },
-        { interest: { $in: [regex] } },
-      ];
-    }
-
-    const exactFilters = [
-      "sexual_orientation",
-      "smoking",
-      "drinking",
-      "diet",
-      "hasKids",
-      "wantsKids",
-      "relationshipGoals",
-    ];
-
-    exactFilters.forEach((field) => {
-      if (query[field]) {
-        matchStage[field] = normalizeValue(query[field]);
-      }
-    });
-
-    const regexFilters = ["body_type", "religion", "caste", "profession", "education"];
-    regexFilters.forEach((field) => {
-      if (query[field]) {
-        matchStage[field] = new RegExp(`^${query[field]}$`, "i");
-      }
-    });
-
-    if (height) {
-      const h = Number(height);
-      matchStage.height = { $gte: h - 5, $lte: h + 5 };
-    }
-
-    if (hasPets !== undefined) {
-      matchStage.hasPets = hasPets === "true";
-    }
-
-    if (minAge || maxAge) {
-      const today = new Date();
-      const minDOB = minAge
-        ? new Date(today.getFullYear() - Number(minAge), today.getMonth(), today.getDate())
-        : null;
-      const maxDOB = maxAge
-        ? new Date(today.getFullYear() - Number(maxAge), today.getMonth(), today.getDate())
-        : null;
-      matchStage.date_of_birth = {};
-      if (maxDOB) matchStage.date_of_birth.$gte = maxDOB;
-      if (minDOB) matchStage.date_of_birth.$lte = minDOB;
-    }
-
-    if (interests) {
-      const interestArray = interests.split(",").map((i) => i.trim().toLowerCase());
-      matchStage.interest = { $in: interestArray };
-    }
-
-    // Enforce 'show_me' from query filter with highest priority
-    if (show_me) {
-      if (show_me.toLowerCase() === "men") {
-        matchStage.gender = "male";
-      } else if (show_me.toLowerCase() === "women") {
-        matchStage.gender = "female";
-      } else {
-        delete matchStage.gender;
-      }
-    } else if (gender) {
-      matchStage.gender = gender.toLowerCase();
-    }
-
-    // Pagination
-    const skip = (Number(page) - 1) * Number(perPage);
-    let pipeline = [];
-
-    if (lat !== undefined && lng !== undefined && preferred_match_distance !== undefined) {
-      const distanceInMeters = Number(preferred_match_distance) * 1609.34;
-      pipeline.push({
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: [parseFloat(lng), parseFloat(lat)],
-          },
-          distanceField: "distance",
-          maxDistance: distanceInMeters,
-          spherical: true,
-          query: matchStage,
-        },
-      });
-    } else {
-      pipeline.push({ $match: matchStage });
-    }
-
-    pipeline.push(
-      { $skip: skip },
-      { $limit: Number(perPage) },
-      {
-        $project: {
-          otp: 0,
-          __v: 0,
-          isNewUser: 0,
-          isVerified: 0,
-          email: 0,
-        },
-      }
-    );
-
-    const users = await User.aggregate(pipeline);
-
-    for (const user of users) {
-      if (user.date_of_birth) {
-        user.date_of_birth = formatDate(user.date_of_birth);
-      }
-    }
-
-    // Count total results separately
-    let totalItems;
-    if (lat !== undefined && lng !== undefined && preferred_match_distance !== undefined) {
-      const countPipeline = [
-        {
-          $geoNear: {
-            near: {
-              type: "Point",
-              coordinates: [parseFloat(lng), parseFloat(lat)],
-            },
-            distanceField: "distance",
-            maxDistance: Number(preferred_match_distance) * 1609.34,
-            spherical: true,
-            query: matchStage,
-          },
-        },
-        { $count: "total" },
-      ];
-      const countResult = await User.aggregate(countPipeline);
-      totalItems = countResult[0]?.total || 0;
-    } else {
-      totalItems = await User.countDocuments(matchStage);
-    }
-
-    const totalPages = Math.ceil(totalItems / perPage);
-
-    return handleResponse(res, 200, "Filtered users fetched successfully.", {
-      results: users,
-      totalItems,
-      currentPage: Number(page),
-      totalPages,
-      totalItemsOnCurrentPage: users.length,
-    });
-  } catch (error) {
-    console.error("Error in filterUsers:", error);
-    return handleResponse(res, 500, "Something went wrong.");
-  }
-};
-*/
-
-//location name included, time consuming
-const filterUsers = async (req, res) => {
-  try {
-    const userId = req.user.id;
-
-    // ✅ Fetch blocked and reported users separately
-    const blockedUsers = await Block.find({ userId });
-    const blockedUserIds = blockedUsers.map((b) => b.targetUserId);
-
-    const reportedUsers = await Report.find({ userId });
-    const reportedUserIds = reportedUsers.map((r) => r.targetUserId);
-
-    const query = { q: "", page: 1, perPage: 15, ...req.query };
-    const {
-      q,
-      gender,
-      sexual_orientation,
-      show_me,
-      minAge,
-      maxAge,
-      preferred_match_distance,
-      height,
-      hasPets,
-      interests,
-      lat,
-      lng,
-      page,
-      perPage,
-    } = query;
-
-    const normalizeValue = (val) => {
-      if (typeof val === "string") {
-        return val.charAt(0).toUpperCase() + val.slice(1).toLowerCase();
-      }
-      return val;
-    };
-
-    const matchStage = {
-      _id: {
-        $ne: new mongoose.Types.ObjectId(String(userId)),
-        $nin: [...blockedUserIds, ...reportedUserIds],
-      },
-      isVerified: true,
-    };
-
-    if (q) {
-      const regex = new RegExp(q, "i");
-      matchStage.$or = [
-        { name: regex },
-        { bio: regex },
-        { profession: regex },
-        { education: regex },
-        { interest: { $in: [regex] } },
-      ];
-    }
-
-    if (sexual_orientation) {
-      matchStage.sexual_orientation = new RegExp(
-        `^${sexual_orientation}$`,
-        "i"
-      );
-    }
-
-    const exactFilters = [
-      "smoking",
-      "drinking",
-      "diet",
-      "hasKids",
-      "wantsKids",
-      "relationshipGoals",
-    ];
-    exactFilters.forEach((field) => {
-      if (query[field]) {
-        matchStage[field] = normalizeValue(query[field]);
-      }
-    });
-
-    const regexFilters = [
-      "body_type",
-      "religion",
-      "caste",
-      "profession",
-      "education",
-    ];
-    regexFilters.forEach((field) => {
-      if (query[field]) {
-        matchStage[field] = new RegExp(`^${query[field]}$`, "i");
-      }
-    });
-
-    if (height) {
-      const h = Number(height);
-      matchStage.height = { $lte: h }; // ✅ less than or equal to
-    }
-
-    if (hasPets !== undefined) {
-      matchStage.hasPets = hasPets === "true";
-    }
-
-    // ✅ Corrected minAge / maxAge logic
-    if (minAge || maxAge) {
-      const today = new Date();
-      const minDOB = maxAge
-        ? new Date(
-            today.getFullYear() - Number(maxAge),
-            today.getMonth(),
-            today.getDate()
-          )
-        : null;
-      const maxDOB = minAge
-        ? new Date(
-            today.getFullYear() - Number(minAge),
-            today.getMonth(),
-            today.getDate()
-          )
-        : null;
-
-      matchStage.date_of_birth = {};
-      if (minDOB) matchStage.date_of_birth.$gte = minDOB;
-      if (maxDOB) matchStage.date_of_birth.$lte = maxDOB;
-    }
-
-    if (interests) {
-      const interestArray = interests
-        .split(",")
-        .map((i) => i.trim().toLowerCase());
-      matchStage.interest = { $in: interestArray };
-    }
-
-    if (show_me) {
-      if (show_me.toLowerCase() === "men") {
-        matchStage.gender = "male";
-      } else if (show_me.toLowerCase() === "women") {
-        matchStage.gender = "female";
-      } else {
-        delete matchStage.gender;
-      }
-    } else if (gender) {
-      matchStage.gender = gender.toLowerCase();
-    }
-
-    const skip = (Number(page) - 1) * Number(perPage);
-    const pipeline = [];
-
-    if (
-      lat !== undefined &&
-      lng !== undefined &&
-      preferred_match_distance !== undefined
-    ) {
-      const distanceInMeters = Number(preferred_match_distance) * 1609.34;
-      pipeline.push({
-        $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: [parseFloat(lng), parseFloat(lat)],
-          },
-          distanceField: "distance",
-          maxDistance: distanceInMeters,
-          spherical: true,
-          query: matchStage,
-        },
-      });
-    } else {
-      pipeline.push({ $match: matchStage });
-    }
-
-    pipeline.push(
-      { $skip: skip },
-      { $limit: Number(perPage) },
-      {
-        $project: {
-          otp: 0,
-          __v: 0,
-          isNewUser: 0,
-          isVerified: 0,
-          email: 0,
-        },
-      }
-    );
-
-    const users = await User.aggregate(pipeline);
-
-    for (const user of users) {
-      if (user.date_of_birth)
-        user.date_of_birth = formatDate(user.date_of_birth);
-
-      if (user.location?.coordinates?.length === 2) {
-        const [lng, lat] = user.location.coordinates;
-        user.location = await getPlaceName(lat, lng);
-      } else {
-        user.location = "Location not set";
-      }
-    }
-
-    let totalItems;
-    if (
-      lat !== undefined &&
-      lng !== undefined &&
-      preferred_match_distance !== undefined
-    ) {
-      const countPipeline = [
-        {
-          $geoNear: {
-            near: {
-              type: "Point",
-              coordinates: [parseFloat(lng), parseFloat(lat)],
-            },
-            distanceField: "distance",
-            maxDistance: Number(preferred_match_distance) * 1609.34,
-            spherical: true,
-            query: matchStage,
-          },
-        },
-        { $count: "total" },
-      ];
-      const countResult = await User.aggregate(countPipeline);
-      totalItems = countResult[0]?.total || 0;
-    } else {
-      totalItems = await User.countDocuments(matchStage);
-    }
-
-    const totalPages = Math.ceil(totalItems / perPage);
-
-    return handleResponse(res, 200, "Filtered users fetched successfully.", {
-      results: users,
-      totalItems,
-      currentPage: Number(page),
-      totalPages,
-      totalItemsOnCurrentPage: users.length,
-    });
-  } catch (error) {
-    console.error("Error in filterUsers:", error);
     return handleResponse(res, 500, "Something went wrong.");
   }
 };
@@ -1355,6 +665,113 @@ const getUsers = async (req, res) => {
   }
 };
 
+const updateProfile = async (req, res) => {
+  try {
+    const body = { ...req.body };
+
+    // Validate using Joi (sirf provided fields ke liye)
+    const { error } = updateProfileValidator.validate(body);
+    if (error) {
+      const cleanMessage = error.details[0].message.replace(/\"/g, "");
+      return handleResponse(res, 400, cleanMessage);
+    }
+
+    // Verify token
+    const token = req.header("Authorization")?.replace("Bearer ", "");
+    if (!token)
+      return handleResponse(res, 401, "Authorization token required.");
+
+    let decodedToken;
+    try {
+      decodedToken = jwt.verify(
+        token,
+        process.env.JWT_SECRET || "your-secret-key"
+      );
+    } catch (err) {
+      return handleResponse(res, 400, "Invalid or expired token.");
+    }
+
+    // Find user by token
+    const user = await User.findById(decodedToken.userId);
+    if (!user || !user.isVerified) {
+      return handleResponse(res, 404, "User not found or not verified.");
+    }
+
+    // Sirf un fields ko update karo jo request me hain
+    if (body.fullName !== undefined) user.name = body.fullName;
+    if (body.dob !== undefined)
+      user.date_of_birth = parseDateDMY(body.dob) || user.date_of_birth;
+    if (body.gender !== undefined) user.gender = body.gender;
+    if (body.sexual_orientation !== undefined)
+      user.sexual_orientation = body.sexual_orientation;
+    if (body.location !== undefined)
+      user.location = parseLocation(body.location) || user.location;
+    if (body.preferred_match_distance !== undefined)
+      user.preferred_match_distance = body.preferred_match_distance;
+    if (body.show_me !== undefined) user.show_me = body.show_me;
+    if (body.age_range !== undefined)
+      user.age_range = normalizeAgeRange(body.age_range) || user.age_range;
+    if (body.height !== undefined)
+      user.height = body.height ? parseInt(body.height) : user.height;
+    if (body.body_type !== undefined) user.body_type = body.body_type;
+    if (body.education !== undefined) user.education = body.education;
+    if (body.profession !== undefined) user.profession = body.profession;
+    if (body.bio !== undefined) user.bio = body.bio;
+    if (body.interest !== undefined)
+      user.interest = normalizeInterest(body.interest) || user.interest;
+    if (body.smoking !== undefined) user.smoking = body.smoking;
+    if (body.drinking !== undefined) user.drinking = body.drinking;
+    if (body.diet !== undefined) user.diet = body.diet;
+    if (body.religion !== undefined) user.religion = body.religion;
+    if (body.caste !== undefined) user.caste = body.caste;
+    if (body.hasKids !== undefined) user.hasKids = body.hasKids;
+    if (body.wantsKids !== undefined) user.wantsKids = body.wantsKids;
+    if (body.hasPets !== undefined)
+      user.hasPets = body.hasPets === "true" || body.hasPets === true;
+    if (body.relationshipGoals !== undefined)
+      user.relationshipGoals = body.relationshipGoals;
+    if (body.mobile_number !== undefined)
+      user.mobile_number = body.mobile_number;
+    if (req.convertedFiles?.images !== undefined)
+      user.images = req.convertedFiles.images || user.images;
+
+    // Recalculate profile completeness
+    user.profileCompleteness = calculateProfileCompleteness(user);
+
+     if (
+      user.location &&
+      user.location.coordinates &&
+      user.location.coordinates.length === 2
+    ) {
+      const [lng, lat] = user.location.coordinates;
+
+      if (
+        !user.location.place_name ||
+        user.location.place_name === "Location not set"
+      ) {
+        // ✅ placeData is a string like "Rau Tahsil"
+        const placeData = await getPlaceName(lat, lng);
+        console.log("Fetched Citiesssssss:", placeData);
+
+        user.location.place_name = placeData || "Unknown";
+      }
+    }
+    await user.save();
+
+    // Generate and return new token
+    const updatedToken = generateToken(user._id, user.email);
+    return handleResponse(res, 200, "Profile updated successfully.", {
+      token: updatedToken,
+      ...user.toObject(),
+    });
+  } catch (error) {
+    console.error("Update Profile error:", error);
+    return handleResponse(res, 500, "Something went wrong.", {
+      error: error.message,
+    });
+  }
+};
+
 export const user = {
   verifyEmailForOTP,
   completeRegistrationAfterEmailVerification,
@@ -1362,7 +779,6 @@ export const user = {
   me,
   getUserDetailsByUserId,
   getMatches,
-  getAllUsers,
-  filterUsers,
   getUsers,
+  updateProfile,
 };

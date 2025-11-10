@@ -105,18 +105,3 @@ const userSchema = new mongoose.Schema(
 userSchema.index({ location: "2dsphere" });
 
 export const User = mongoose.model("User", userSchema);
-
-//Yeh ek GeoJSON "Point" type hai, jisme coordinates hote hain [longitude, latitude] ke format mein.
-// userSchema.index({ location: "2dsphere" });
-//MongoDB ko batane ke liye ki:
-// Ye field special hai — ek geo-location point hai.
-// Ispe distance-based search (like nearest users within 50km) karni hai.
-// Toh ispe ek 2dsphere index bana do.
-
-/*
-userSchema.index({ location: "2dsphere" }) ka matlab hai:
-→ MongoDB ko batana ki location ek geographical point hai,
-→ jisme longitude-latitude hote hain,
-→ aur is field pe tum location-based search karna chahte ho.
-→ Isliye ek special 2dsphere index lagaya jaata hai.
-*/
