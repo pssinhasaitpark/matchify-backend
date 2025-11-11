@@ -9,7 +9,7 @@ const messageSubSchema = new mongoose.Schema(
     read: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
   },
-  { _id: false }
+  { _id: true }
 );
 
 const messageSchema = new mongoose.Schema(

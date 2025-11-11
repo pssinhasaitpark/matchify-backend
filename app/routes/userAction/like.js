@@ -1,11 +1,10 @@
 // routes/userAction/like.js
 import express from "express";
 import { likes } from "../../controllers/userAction/like.js";
-import { verifyToken } from "../../middlewares/jwtAuth.js"; // assuming you have auth middleware
-
+import { verifyToken, checkPlan } from "../../middlewares/jwtAuth.js";
 const router = express.Router();
 
-router.post("/:targetUserId", verifyToken, likes.likeUser);
+router.post("/:targetUserId", verifyToken, checkPlan("LIKE"), likes.likeUser);
 
 router.get("/all", verifyToken, likes.getAllLikedUsers);
 

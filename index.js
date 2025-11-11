@@ -41,11 +41,12 @@ const server = http.createServer(app);
 
 const io = new SocketIO(server, {
   cors: {
-    origin: [
-      "http://localhost:8081",
-      "http://localhost:8082",
-      "https://matchify-backend-puce.vercel.app",
-    ],
+    // origin: [
+    //   "http://localhost:8081",
+    //   "http://localhost:8082",
+    //   "https://matchify-backend-puce.vercel.app",
+    // ],
+    origin: "*",
     methods: ["GET", "POST"],
     credentials: true,
   },

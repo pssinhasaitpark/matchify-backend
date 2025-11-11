@@ -558,8 +558,10 @@ const updateProfile = async (req, res) => {
       user.relationshipGoals = body.relationshipGoals;
     if (body.mobile_number !== undefined)
       user.mobile_number = body.mobile_number;
-    if (req.convertedFiles?.images !== undefined)
-      user.images = req.convertedFiles.images || user.images;
+    // if (req.convertedFiles?.images !== undefined)
+    //   user.images = req.convertedFiles.images || user.images;
+    if (req.convertedFiles?.images && Array.isArray(req.convertedFiles.images) && req.convertedFiles.images.length > 0) 
+      {  user.images = req.convertedFiles.images ; }
 
     user.profileCompleteness = calculateProfileCompleteness(user);
 
