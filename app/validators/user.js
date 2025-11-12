@@ -63,7 +63,7 @@ export const userRegistrationValidator = Joi.object({
   wantsKids: Joi.string().valid("Yes", "No", "Maybe").optional(),
   hasPets: Joi.alternatives().try(Joi.boolean(), Joi.string()).optional(),
   relationshipGoals: Joi.string()
-    .valid("Casual Dating", "Serious Relationship", "Marriage", "Open to explore")
+    .valid("Casual Dating", "Serious Relationship", "Marriage", "Open to explore", "Long Term", "Short Term", "Friendship", "Activity Partner", "Companionship", "Not Sure Yet", "Prefer Not to Say")
     .optional(),
 
   images: Joi.array().items(Joi.string().uri()).optional(),
@@ -79,7 +79,6 @@ export const userRegistrationValidator = Joi.object({
 
 });
 
-// app/validators/user.js
 export const updateProfileValidator = Joi.object({
   fullName: Joi.string().min(3).max(50).optional(),
   dob: Joi.string().pattern(/^\d{2}\/\d{2}\/\d{4}$/).optional(),

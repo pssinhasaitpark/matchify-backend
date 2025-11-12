@@ -1,11 +1,11 @@
 // models/chat/message.js
-
 import mongoose from "mongoose";
 
 const messageSubSchema = new mongoose.Schema(
   {
     sender: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
     text: { type: String, required: true },
+    delivered: { type: Boolean, default: false },
     read: { type: Boolean, default: false },
     createdAt: { type: Date, default: Date.now },
   },

@@ -4,6 +4,8 @@ import { Message } from "../../models/chat/message.js";
 import { Like } from "../../models/userAction/like.js";
 import { handleResponse } from "../../utils/helper.js";
 
+/*
+// 11 Nov 2025
 const createChatMessage = async (req, res) => {
   try {
     const sender = req.user.id;
@@ -53,9 +55,9 @@ const createChatMessage = async (req, res) => {
     return handleResponse(res, 500, "Internal Server Error");
   }
 };
+*/
 
-/*
-//shivam
+// 12 Nov 2025
 const createChatMessage = async (req, res) => {
   try {
     const sender = req.user.id;
@@ -65,64 +67,36 @@ const createChatMessage = async (req, res) => {
     if (!mongoose.Types.ObjectId.isValid(receiverId))
       return handleResponse(res, 400, "Invalid receiver ID");
 
-    if (!text || text.trim() === "")
-      return handleResponse(res, 400, "Message text is required");
+    if (!text?.trim()) return handleResponse(res, 400, "Message text is required");
 
-    // Check mutual like first
     const likedByUser = await Like.findOne({ userId: sender, targetUserId: receiverId });
     const likedByReceiver = await Like.findOne({ userId: receiverId, targetUserId: sender });
-
     if (!likedByUser || !likedByReceiver)
       return handleResponse(res, 403, "Chat not allowed without mutual like");
 
-    // Find or create conversation
     let conversation = await Message.findOne({
       participants: { $all: [sender, receiverId] },
     });
 
-    const newMessage = { sender, receiverId, text, read: false, createdAt: new Date() };
+    const newMessage = { sender, text, read: false, delivered: false, createdAt: new Date() };
 
     if (!conversation) {
-      // ✅ Create a new conversation document
       conversation = await Message.create({
         participants: [sender, receiverId],
         messages: [newMessage],
       });
-
-      // ✅ Remove mutual like once first chat happens
-      await Promise.all([
-        Like.deleteOne({ userId: sender, targetUserId: receiverId }),
-        Like.deleteOne({ userId: receiverId, targetUserId: sender }),
-      ]);
-
-      console.log(`💬 First chat! Mutual like removed between ${sender} and ${receiverId}`);
-
-      // ✅ Optional: emit event for real-time UI updates
-      if (req.io) {
-        req.io.to(receiverId.toString()).emit("mutual-like-to-chat", { sender, receiverId });
-        req.io.to(sender.toString()).emit("mutual-like-to-chat", { sender, receiverId });
-      }
-
     } else {
-      // Add new message to existing conversation
       conversation.messages.push(newMessage);
       conversation.updatedAt = new Date();
       await conversation.save();
     }
 
-    // ✅ Emit message events
-    if (req.io) {
-      req.io.to(receiverId.toString()).emit("receive-message", newMessage);
-      req.io.to(sender.toString()).emit("message-sent", newMessage);
-    }
-
-    return handleResponse(res, 201, "Message sent successfully", newMessage);
+    return handleResponse(res, 201, "Message stored successfully", newMessage);
   } catch (err) {
     console.error("Error sending message:", err);
     return handleResponse(res, 500, "Internal Server Error");
   }
 };
-*/
 
 const getChatHistory = async (req, res) => {
   try {

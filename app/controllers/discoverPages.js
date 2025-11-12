@@ -6,6 +6,7 @@ import { calculateAge, handleResponse } from "../utils/helper.js";
 import { getPlaceName, calculateDistance } from "../services/locationService.js";
 import { getUserPlan, incrementActionUsage, markUserAsShown, } from "../services/planService.js";
 
+/*
 const getSimilarInterestUsers = async (req, res) => {
   try {
     const currentUserId = req.user.id;
@@ -352,9 +353,9 @@ const getRecommendedUsers = async (req, res) => {
     return handleResponse(res, 500, "Something went wrong while fetching recommended users.");
   }
 };
+*/
 
 // below without plans 
-/*
 const getSimilarInterestUsers = async (req, res) => {
   try {
     const currentUserId = req.user.id;
@@ -665,7 +666,7 @@ const getRecommendedUsers = async (req, res) => {
     return handleResponse(res, 500, "Something went wrong while fetching recommended users.");
   }
 };
-*/
+
 export const discover = {
   getSimilarInterestUsers,
   getAllUsersWithSameDatingGoals,
