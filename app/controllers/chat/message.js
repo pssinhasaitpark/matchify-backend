@@ -54,37 +54,130 @@ const createChatMessage = async (req, res) => {
   }
 };
 
-const getChatHistory = async (req, res) => {
+/*
+//shivam
+const createChatMessage = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const sender = req.user.id;
     const { receiverId } = req.params;
+    const { text } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(receiverId))
       return handleResponse(res, 400, "Invalid receiver ID");
 
-    // Ensure mutual like exists before allowing chat
-    const likedByUser = await Like.findOne({ userId, targetUserId: receiverId });
-    const likedByReceiver = await Like.findOne({ userId: receiverId, targetUserId: userId });
+    if (!text || text.trim() === "")
+      return handleResponse(res, 400, "Message text is required");
+
+    // Check mutual like first
+    const likedByUser = await Like.findOne({ userId: sender, targetUserId: receiverId });
+    const likedByReceiver = await Like.findOne({ userId: receiverId, targetUserId: sender });
 
     if (!likedByUser || !likedByReceiver)
       return handleResponse(res, 403, "Chat not allowed without mutual like");
 
-    // Fetch conversation between two users
+    // Find or create conversation
+    let conversation = await Message.findOne({
+      participants: { $all: [sender, receiverId] },
+    });
+
+    const newMessage = { sender, receiverId, text, read: false, createdAt: new Date() };
+
+    if (!conversation) {
+      // ✅ Create a new conversation document
+      conversation = await Message.create({
+        participants: [sender, receiverId],
+        messages: [newMessage],
+      });
+
+      // ✅ Remove mutual like once first chat happens
+      await Promise.all([
+        Like.deleteOne({ userId: sender, targetUserId: receiverId }),
+        Like.deleteOne({ userId: receiverId, targetUserId: sender }),
+      ]);
+
+      console.log(`💬 First chat! Mutual like removed between ${sender} and ${receiverId}`);
+
+      // ✅ Optional: emit event for real-time UI updates
+      if (req.io) {
+        req.io.to(receiverId.toString()).emit("mutual-like-to-chat", { sender, receiverId });
+        req.io.to(sender.toString()).emit("mutual-like-to-chat", { sender, receiverId });
+      }
+
+    } else {
+      // Add new message to existing conversation
+      conversation.messages.push(newMessage);
+      conversation.updatedAt = new Date();
+      await conversation.save();
+    }
+
+    // ✅ Emit message events
+    if (req.io) {
+      req.io.to(receiverId.toString()).emit("receive-message", newMessage);
+      req.io.to(sender.toString()).emit("message-sent", newMessage);
+    }
+
+    return handleResponse(res, 201, "Message sent successfully", newMessage);
+  } catch (err) {
+    console.error("Error sending message:", err);
+    return handleResponse(res, 500, "Internal Server Error");
+  }
+};
+*/
+
+const getChatHistory = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { receiverId } = req.params;
+    const { page = 1, limit = 20 } = req.query; 
+
+    if (!mongoose.Types.ObjectId.isValid(receiverId))
+      return handleResponse(res, 400, "Invalid receiver ID");
+
+    // 🧠 Ensure mutual like exists before allowing chat
+    const likedByUser = await Like.findOne({ userId, targetUserId: receiverId });
+    const likedByReceiver = await Like.findOne({
+      userId: receiverId,
+      targetUserId: userId,
+    }).sort({ createdAt: -1 });
+
+    if (!likedByUser || !likedByReceiver)
+      return handleResponse(res, 403, "Chat not allowed without mutual like");
+
+    // 🔍 Fetch conversation between the two users
     const conversation = await Message.findOne({
       participants: { $all: [userId, receiverId] },
     }).lean();
 
-    if (!conversation)
-      return handleResponse(res, 200, "No messages yet", { results: [] });
+    if (!conversation || !conversation.messages || conversation.messages.length === 0)
+      return handleResponse(res, 200, "No messages yet", {
+        results: [],
+        totalItems: 0,
+        currentPage: Number(page),
+        totalPages: 0,
+      });
 
-    // ✅ Add receiverId for each message dynamically
-    const results = conversation.messages.map(msg => ({
+    // 🧮 Pagination logic
+    const totalMessages = conversation.messages.length;
+    const totalPages = Math.ceil(totalMessages / limit);
+    const skip = (page - 1) * limit;
+
+    // ✅ Sort by createdAt (latest first) and paginate
+    const sortedMessages = conversation.messages
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(skip, skip + Number(limit));
+
+    // ✅ Add receiverId dynamically
+    const results = sortedMessages.map((msg) => ({
       receiverId: msg.sender.toString() === userId ? receiverId : userId,
       ...msg,
     }));
 
+    // ✅ Final response with pagination metadata
     return handleResponse(res, 200, "Chat history fetched successfully", {
-      results
+      results,
+      totalItems: totalMessages,
+      currentPage: Number(page),
+      totalPages,
     });
   } catch (err) {
     console.error("Error fetching chat:", err);
@@ -100,7 +193,7 @@ const getUserChats = async (req, res) => {
     const conversations = await Message.find({
       participants: userId,
     })
-      .populate("participants", "name") 
+      .populate("participants", "name images") 
       .lean();
 
     if (!conversations || conversations.length === 0)
@@ -121,6 +214,7 @@ const getUserChats = async (req, res) => {
         name: otherUser?.name || "Unknown",
         lastMessage: lastMessage ? lastMessage.text : null,
         lastMessageTime: lastMessage ? lastMessage.createdAt : null,
+        profilePic: otherUser?.images?.[0] || null,
         unreadCount,
       };
     });

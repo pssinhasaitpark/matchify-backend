@@ -97,6 +97,18 @@ const userSchema = new mongoose.Schema(
     profileCompleteness: { type: Number, default: 0 },
     lastActiveAt: { type: Date, default: Date.now },
 
+    plan: { type: String, enum: ["FREE", "BOOST", "PREMIUM"], default: "FREE" },
+    planExpiry: { type: Date, default: null },
+
+    dailyLikesUsed: { type: Number, default: 0 },
+    dailyWhoLikedMeUsed: { type: Number, default: 0 },
+    dailyDiscoverUsed: { type: Number, default: 0 },
+
+    shownSimilarInterestUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    shownSameDatingGoalsUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    shownCommunitiesInCommonUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    shownRecommendedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
+    
     // googleId: { type: String, default: null },
   },
   { timestamps: true }

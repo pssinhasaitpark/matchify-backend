@@ -2,6 +2,7 @@
 import jwt from "jsonwebtoken";
 import { User } from '../models/user.js';
 import { handleResponse } from "../utils/helper.js";
+import { canPerformAction } from "../services/planService.js";
 
 export const generateToken = (userId, email) => {
   const payload = { userId, email };
@@ -49,5 +50,20 @@ export const verifyToken = async (req, res, next) => {
     }
 
     return handleResponse(res, 500, "Internal server error.");
+  }
+};
+
+// app/middlewares/checkPlan.js
+export const checkPlan = (action) => async (req, res, next) => {
+  try {
+    const userId = req.user.id;
+    const canPerform = await canPerformAction(userId, action);
+    if (!canPerform) {
+      return handleResponse(res, 403, `You have reached your daily ${action.toLowerCase()} limit. Upgrade your plan.`);
+    }
+    next();
+  } catch (error) {
+    console.error("Error in checkPlan:", error);
+    return handleResponse(res, 500, "Something went wrong.");
   }
 };
