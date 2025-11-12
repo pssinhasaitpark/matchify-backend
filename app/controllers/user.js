@@ -10,7 +10,7 @@ import { generateToken } from "../middlewares/jwtAuth.js";
 import jwt from "jsonwebtoken";
 import mongoose from "mongoose";
 import { normalizeInterest, normalizeAgeRange, assignUserFields, calculateProfileCompleteness, parseDateDMY, parseLocation } from "../utils/user.js";
-import { getPlaceName } from "../services/locationService.js";
+import { calculateDistance, getPlaceName } from "../services/locationService.js";
 
 const completeRegistrationAfterEmailVerification = async (req, res) => {
   try {
@@ -232,25 +232,18 @@ const getUserDetailsByUserId = async (req, res) => {
       return handleResponse(res, 404, "User not found or not verified.");
     }
 
-    const { location, preferred_match_distance, show_me } = currentUser;
-
-    if (
-      !location ||
-      !location.coordinates ||
-      location.coordinates.length !== 2
-    ) {
+    const { location, preferred_match_distance = 50 } = currentUser;
+    if (!location?.coordinates || location.coordinates.length !== 2) {
       return handleResponse(res, 400, "User location not set.");
     }
 
-    const maxDistance = (preferred_match_distance || 50) * 1000; // km → meters
+    const maxDistance = preferred_match_distance * 1000; // km → meters
 
+    // First, try to find the user within distance
     const pipeline = [
       {
         $geoNear: {
-          near: {
-            type: "Point",
-            coordinates: location.coordinates,
-          },
+          near: { type: "Point", coordinates: location.coordinates },
           distanceField: "distance",
           spherical: true,
           maxDistance: maxDistance,
@@ -260,51 +253,61 @@ const getUserDetailsByUserId = async (req, res) => {
           },
         },
       },
-      {
-        $project: {
-          otp: 0,
-          isNewUser: 0,
-          __v: 0,
-          createdAt: 0,
-          updatedAt: 0,
-          profileCompleteness: 0,
-        },
-      },
     ];
 
-    const results = await User.aggregate(pipeline);
-    if (!results.length) {
-      return handleResponse(res, 404, "User not found or outside range.");
-    }
+    let results = await User.aggregate(pipeline);
+    let userDoc;
 
-    const requestedUser = results[0];
+    if (results.length === 0) {
+      // Not within range → fetch directly
+      userDoc = await User.findOne({
+        _id: userId,
+        isVerified: true,
+      }).lean();
 
-    // Convert distance to km
-    requestedUser.distance = (requestedUser.distance / 1000).toFixed(2);
+      if (!userDoc) {
+        return handleResponse(res, 404, "User not found.");
+      }
 
-    // Format DOB
-    if (requestedUser.date_of_birth) {
-      requestedUser.date_of_birth = formatDate(requestedUser.date_of_birth);
-    }
-
-    // Add human-readable location name
-    if (
-      requestedUser.location &&
-      requestedUser.location.coordinates &&
-      requestedUser.location.coordinates.length === 2
-    ) {
-      const [lng, lat] = requestedUser.location.coordinates;
-      requestedUser.location = await getPlaceName(lat, lng);
+      const distance = calculateDistance(currentUser.location, userDoc.location);
+      userDoc.distance = Number(distance.toFixed(1));
+      userDoc.outsideRange = true;
     } else {
-      requestedUser.location = "Location not set";
+      // Found within range
+      userDoc = results[0];
+      userDoc.distance = Number((userDoc.distance / 1000).toFixed(1));
+      userDoc.outsideRange = false;
     }
 
-    return handleResponse(
-      res,
-      200,
-      "User details fetched successfully.",
-      requestedUser
-    );
+    // ✅ Use stored place_name if present
+    let placeName = "Unknown";
+    if (userDoc.location?.place_name) {
+      placeName = userDoc.location.place_name;
+    } else if (
+      userDoc.location?.coordinates &&
+      userDoc.location.coordinates.length === 2
+    ) {
+      const [lng, lat] = userDoc.location.coordinates;
+      placeName = await getPlaceName(lat, lng);
+    }
+
+    // ✅ Clean final object (no otp, __v, etc.)
+    const {
+      otp,
+      __v,
+      isNewUser,
+      profileCompleteness,
+      createdAt,
+      updatedAt,
+      ...cleanedUser
+    } = userDoc;
+
+    cleanedUser.location = placeName;
+    if (cleanedUser.date_of_birth) {
+      cleanedUser.date_of_birth = formatDate(cleanedUser.date_of_birth);
+    }
+
+    return handleResponse(res, 200, "User details fetched successfully.", cleanedUser);
   } catch (error) {
     console.error("Error in getUserDetailsByUserId:", error);
     return handleResponse(res, 500, "Something went wrong.");

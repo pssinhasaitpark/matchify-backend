@@ -602,11 +602,7 @@ const getUsersWhoLikedMe = async (req, res) => {
 
     // 2️⃣ Check if user can perform this action (plan limit)
     if (plan.dailyWhoLikedMeLimit !== -1 && (user.dailyWhoLikedMeUsed || 0) >= plan.dailyWhoLikedMeLimit) {
-      return handleResponse(
-        res,
-        403,
-        "You have reached your daily 'Who Liked Me' limit. Upgrade your plan."
-      );
+      return handleResponse(res, 403, "You have reached your daily 'Who Liked Me' limit. Upgrade your plan.");
     }
 
     const skip = (Number(page) - 1) * Number(perPage);

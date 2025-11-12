@@ -47,47 +47,19 @@ const userSchema = new mongoose.Schema(
     interest: { type: [String], default: [] },
     smoking: { type: String, enum: ["Yes", "No", "Sometimes"], default: "No" },
     drinking: { type: String, enum: ["Yes", "No", "Socially"], default: "No" },
-    diet: {
-      type: String,
-      enum: [
-        "None",
-        "Vegan",
-        "Vegetarian",
-        "Non Vegetarian",
-        "Halal",
-        "Kosher",
-        "Other",
-      ],
-      default: "None",
-    },
+    diet: { type: String,  enum: ["None", "Vegan", "Vegetarian", "Non Vegetarian", "Halal", "Kosher", "Other" ], default: "None" },
     religion: { type: String, default: null },
     caste: { type: String, default: null },
-    hasKids: {
-      type: String,
-      enum: ["Yes", "No", "Prefer not to say"],
-      default: "Prefer not to say",
-    },
+    hasKids: { type: String, enum: ["Yes", "No", "Prefer not to say"], default: "Prefer not to say" },
     wantsKids: { type: String, enum: ["Yes", "No", "Maybe"], default: "Maybe" },
     hasPets: { type: Boolean, default: false },
     relationshipGoals: {
       type: String,
-      enum: [
-        "Casual Dating",
-        "Serious Relationship",
-        "Marriage",
-        "Open to explore",
-        "Long Term",
-        "Short Term",
-        "Friendship",
-        "Activity Partner",
-        "Companionship",
-        "Not Sure Yet",
-        "Prefer Not to Say",
-      ],
-      default: "Open to explore",
-    },
+      enum: [ "Casual Dating", "Serious Relationship", "Marriage", "Open to explore", "Long Term", "Short Term", "Friendship",
+        "Activity Partner", "Companionship", "Not Sure Yet", "Prefer Not to Say" ], default: "Open to explore"
+       },
 
-    images: { type: [String], required: false },
+    images: { type: [String] },
     mobile_number: { type: String },
 
     isVerified: { type: Boolean, default: false },
@@ -103,13 +75,6 @@ const userSchema = new mongoose.Schema(
     dailyLikesUsed: { type: Number, default: 0 },
     dailyWhoLikedMeUsed: { type: Number, default: 0 },
     dailyDiscoverUsed: { type: Number, default: 0 },
-
-    shownSimilarInterestUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    shownSameDatingGoalsUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    shownCommunitiesInCommonUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    shownRecommendedUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
-    
-    // googleId: { type: String, default: null },
   },
   { timestamps: true }
 );
